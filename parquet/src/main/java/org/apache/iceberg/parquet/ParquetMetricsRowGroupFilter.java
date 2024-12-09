@@ -385,10 +385,6 @@ public class ParquetMetricsRowGroupFilter {
           return ROWS_MIGHT_MATCH;
         }
 
-        if (compareUpperStats(ref, id, id2, colStats, colStats2, cmp -> cmp <= 0)) {
-          return ROWS_CANNOT_MATCH;
-        }
-
         if (compareUpperToLowerStats(ref, id, id2, colStats, colStats2, cmp -> cmp <= 0)) {
           return ROWS_CANNOT_MATCH;
         }
@@ -452,10 +448,6 @@ public class ParquetMetricsRowGroupFilter {
 
         if (minMaxUndefined(colStats) || minMaxUndefined(colStats2)) {
           return ROWS_MIGHT_MATCH;
-        }
-
-        if (compareUpperStats(ref, id, id2, colStats, colStats2, cmp -> cmp < 0)) {
-          return ROWS_CANNOT_MATCH;
         }
 
         if (compareUpperToLowerStats(ref, id, id2, colStats, colStats2, cmp -> cmp < 0)) {

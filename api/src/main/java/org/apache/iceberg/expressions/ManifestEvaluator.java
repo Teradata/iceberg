@@ -329,16 +329,16 @@ public class ManifestEvaluator {
       int pos = Accessors.toPosition(ref.accessor());
       int pos2 = Accessors.toPosition(ref2.accessor());
       ByteBuffer upperBound = stats.get(pos).upperBound();
-      ByteBuffer upperBound2 = stats.get(pos2).upperBound();
-      if (upperBound == null || upperBound2 == null) {
+      ByteBuffer lowerBound = stats.get(pos2).lowerBound();
+      if (upperBound == null || lowerBound == null) {
         return ROWS_CANNOT_MATCH; // values are all null
       }
 
       T upper = Conversions.fromByteBuffer(ref.type(), upperBound);
-      T upper2 = Conversions.fromByteBuffer(ref2.type(), upperBound2);
+      T lower = Conversions.fromByteBuffer(ref2.type(), lowerBound);
 
       Comparator<Object> comparator = Comparators.forType(ref.type().asPrimitiveType());
-      int cmp = comparator.compare(upper, upper2);
+      int cmp = comparator.compare(upper, lower);
       if (cmp < 0) {
         return ROWS_CANNOT_MATCH;
       }
