@@ -284,14 +284,6 @@ public class InclusiveMetricsEvaluator {
         return ROWS_CANNOT_MATCH;
       }
 
-      if (ref.type().typeId() != ref2.type().typeId()) {
-        return ROWS_MIGHT_MATCH;
-      }
-
-      if (checkLowerToUpperBounds(ref, ref2, id, id2, cmp -> cmp > 0)) {
-        return ROWS_CANNOT_MATCH;
-      }
-
       return ROWS_MIGHT_MATCH;
     }
 
@@ -370,14 +362,6 @@ public class InclusiveMetricsEvaluator {
         return ROWS_CANNOT_MATCH;
       }
 
-      if (ref.type().typeId() != ref2.type().typeId()) {
-        return ROWS_MIGHT_MATCH;
-      }
-
-      if (checkUpperToLowerBounds(ref, ref2, id, id2, cmp -> cmp < 0)) {
-        return ROWS_CANNOT_MATCH;
-      }
-
       return ROWS_MIGHT_MATCH;
     }
 
@@ -424,18 +408,6 @@ public class InclusiveMetricsEvaluator {
           || containsNaNsOnly(id)
           || containsNullsOnly(id2)
           || containsNaNsOnly(id2)) {
-        return ROWS_CANNOT_MATCH;
-      }
-
-      if (ref.type().typeId() != ref2.type().typeId()) {
-        return ROWS_MIGHT_MATCH;
-      }
-
-      if (checkLowerToUpperBounds(ref, ref2, id, id2, cmp -> cmp > 0)) {
-        return ROWS_CANNOT_MATCH;
-      }
-
-      if (checkUpperToLowerBounds(ref, ref2, id, id2, cmp -> cmp < 0)) {
         return ROWS_CANNOT_MATCH;
       }
 
