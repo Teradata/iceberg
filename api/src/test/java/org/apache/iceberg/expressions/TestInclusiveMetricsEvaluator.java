@@ -714,15 +714,15 @@ public class TestInclusiveMetricsEvaluator {
         new InclusiveMetricsEvaluator(SCHEMA, termPredicate(Expression.Operation.EQ, "id", "id2"))
             .eval(FILE_2);
     assertThat(shouldRead)
-        .as("Should not read: id range (30,40) can not be equal to id2 range (50,80)")
-        .isFalse();
+        .as("Should not read: id range (30,40) can be equal to id2 range (50,80)")
+        .isTrue();
 
     shouldRead =
         new InclusiveMetricsEvaluator(SCHEMA, termPredicate(Expression.Operation.EQ, "id", "id2"))
             .eval(FILE_3);
     assertThat(shouldRead)
-        .as("Should not read: id range (5,25) can not be equal to id2 range (30,40)")
-        .isFalse();
+        .as("Should not read: id range (5,25) can be equal to id2 range (30,40)")
+        .isTrue();
 
     shouldRead =
         new InclusiveMetricsEvaluator(SCHEMA, termPredicate(Expression.Operation.EQ, "id", "id2"))
