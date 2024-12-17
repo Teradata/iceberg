@@ -319,10 +319,6 @@ public class ParquetMetricsRowGroupFilter {
         if (minMaxUndefined(colStats) || minMaxUndefined(colStats2)) {
           return ROWS_MIGHT_MATCH;
         }
-
-        if (compareLowerToUpperStats(ref, id, id2, colStats, colStats2, cmp -> cmp > 0)) {
-          return ROWS_CANNOT_MATCH;
-        }
       }
 
       return ROWS_MIGHT_MATCH;
@@ -383,10 +379,6 @@ public class ParquetMetricsRowGroupFilter {
 
         if (minMaxUndefined(colStats) || minMaxUndefined(colStats2)) {
           return ROWS_MIGHT_MATCH;
-        }
-
-        if (compareUpperStats(ref, id, id2, colStats, colStats2, cmp -> cmp <= 0)) {
-          return ROWS_CANNOT_MATCH;
         }
 
         if (compareUpperToLowerStats(ref, id, id2, colStats, colStats2, cmp -> cmp <= 0)) {
@@ -452,14 +444,6 @@ public class ParquetMetricsRowGroupFilter {
 
         if (minMaxUndefined(colStats) || minMaxUndefined(colStats2)) {
           return ROWS_MIGHT_MATCH;
-        }
-
-        if (compareUpperStats(ref, id, id2, colStats, colStats2, cmp -> cmp < 0)) {
-          return ROWS_CANNOT_MATCH;
-        }
-
-        if (compareUpperToLowerStats(ref, id, id2, colStats, colStats2, cmp -> cmp < 0)) {
-          return ROWS_CANNOT_MATCH;
         }
       }
 
@@ -565,50 +549,9 @@ public class ParquetMetricsRowGroupFilter {
           if (minMaxUndefined(colStats) || minMaxUndefined(colStats2)) {
             return ROWS_MIGHT_MATCH;
           }
-
-          if (compareLowerStats(ref, id, id2, colStats, colStats2, cmp -> cmp > 0)) {
-            return ROWS_CANNOT_MATCH;
-          }
-          if (compareUpperStats(ref, id, id2, colStats, colStats2, cmp -> cmp < 0)) {
-            return ROWS_CANNOT_MATCH;
-          }
         }
       }
       return ROWS_MIGHT_MATCH;
-    }
-
-    private <T> boolean compareUpperStats(
-        BoundReference<T> ref,
-        int id,
-        int id2,
-        Statistics<?> colStats,
-        Statistics<?> colStats2,
-        java.util.function.Predicate<Integer> compare) {
-      int cmp;
-
-      T upper = max(colStats, id);
-      T upper2 = max(colStats2, id2);
-      cmp = ref.comparator().compare(upper, upper2);
-      if (compare.test(cmp)) {
-        return true;
-      }
-      return false;
-    }
-
-    private <T> boolean compareLowerStats(
-        BoundReference<T> ref,
-        int id,
-        int id2,
-        Statistics<?> colStats,
-        Statistics<?> colStats2,
-        java.util.function.Predicate<Integer> compare) {
-      T lower = min(colStats, id);
-      T lower2 = min(colStats2, id2);
-      int cmp = ref.comparator().compare(lower, lower2);
-      if (compare.test(cmp)) {
-        return true;
-      }
-      return false;
     }
 
     private <T> boolean compareLowerToUpperStats(

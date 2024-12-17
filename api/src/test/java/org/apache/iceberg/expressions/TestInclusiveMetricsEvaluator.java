@@ -553,8 +553,8 @@ public class TestInclusiveMetricsEvaluator {
                 SCHEMA, termPredicate(Expression.Operation.LT_EQ, "id", "id2"))
             .eval(FILE_3);
     assertThat(shouldRead)
-        .as("Should not read: id range lower bound (30) is not below upper bound id range (25)")
-        .isFalse();
+        .as("Should not read: id range lower bound (30) can be equal to upper bound range (25)")
+        .isTrue();
 
     shouldRead =
         new InclusiveMetricsEvaluator(
@@ -655,9 +655,8 @@ public class TestInclusiveMetricsEvaluator {
                 SCHEMA, termPredicate(Expression.Operation.GT_EQ, "id", "id2"))
             .eval(FILE_2);
     assertThat(shouldRead)
-        .as(
-            "Should not read: id range upper bound (40) is not greater than upper bound id2 range (80)")
-        .isFalse();
+        .as("Should read: id range upper bound (40) can be equal to upper range (80)")
+        .isTrue();
 
     shouldRead =
         new InclusiveMetricsEvaluator(
@@ -714,15 +713,15 @@ public class TestInclusiveMetricsEvaluator {
         new InclusiveMetricsEvaluator(SCHEMA, termPredicate(Expression.Operation.EQ, "id", "id2"))
             .eval(FILE_2);
     assertThat(shouldRead)
-        .as("Should not read: id range (30,40) can not be equal to id2 range (50,80)")
-        .isFalse();
+        .as("Should not read: id range (30,40) can be equal to id2 range (50,80)")
+        .isTrue();
 
     shouldRead =
         new InclusiveMetricsEvaluator(SCHEMA, termPredicate(Expression.Operation.EQ, "id", "id2"))
             .eval(FILE_3);
     assertThat(shouldRead)
-        .as("Should not read: id range (5,25) can not be equal to id2 range (30,40)")
-        .isFalse();
+        .as("Should not read: id range (5,25) can be equal to id2 range (30,40)")
+        .isTrue();
 
     shouldRead =
         new InclusiveMetricsEvaluator(SCHEMA, termPredicate(Expression.Operation.EQ, "id", "id2"))
