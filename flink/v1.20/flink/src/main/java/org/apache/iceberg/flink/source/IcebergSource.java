@@ -27,7 +27,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
-import org.apache.flink.annotation.Experimental;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -86,7 +85,6 @@ import org.apache.iceberg.util.ThreadPools;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-@Experimental
 public class IcebergSource<T> implements Source<T, IcebergSourceSplit, IcebergEnumeratorState> {
   private static final Logger LOG = LoggerFactory.getLogger(IcebergSource.class);
 
@@ -153,7 +151,7 @@ public class IcebergSource<T> implements Source<T, IcebergSourceSplit, IcebergEn
     }
 
     ExecutorService workerPool =
-        ThreadPools.newWorkerPool(threadName, scanContext.planParallelism());
+        ThreadPools.newFixedThreadPool(threadName, scanContext.planParallelism());
     try (TableLoader loader = tableLoader.clone()) {
       loader.open();
       this.batchSplits =

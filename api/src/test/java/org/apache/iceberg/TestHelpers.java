@@ -39,6 +39,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.apache.iceberg.expressions.BoundPredicate;
 import org.apache.iceberg.expressions.BoundSetPredicate;
@@ -52,6 +53,10 @@ import org.objenesis.strategy.StdInstantiatorStrategy;
 public class TestHelpers {
 
   private TestHelpers() {}
+
+  public static final int MAX_FORMAT_VERSION = 3;
+  public static final List<Integer> ALL_VERSIONS =
+      IntStream.rangeClosed(1, MAX_FORMAT_VERSION).boxed().collect(Collectors.toUnmodifiableList());
 
   /** Wait in a tight check loop until system clock is past {@code timestampMillis} */
   public static long waitUntilAfter(long timestampMillis) {
@@ -646,7 +651,7 @@ public class TestHelpers {
 
     @Override
     public FileFormat format() {
-      return FileFormat.fromFileName(path());
+      return FileFormat.fromFileName(location());
     }
 
     @Override

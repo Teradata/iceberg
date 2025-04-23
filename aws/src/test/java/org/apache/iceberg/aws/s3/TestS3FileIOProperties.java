@@ -36,8 +36,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import software.amazon.awssdk.core.retry.RetryPolicy;
+import software.amazon.awssdk.services.s3.S3AsyncClientBuilder;
+import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3ClientBuilder;
 import software.amazon.awssdk.services.s3.S3Configuration;
+import software.amazon.awssdk.services.s3.S3CrtAsyncClientBuilder;
 import software.amazon.awssdk.services.s3.model.ObjectCannedACL;
 import software.amazon.awssdk.services.s3.model.Tag;
 
@@ -49,6 +53,7 @@ public class TestS3FileIOProperties {
   private static final String S3_DELETE_TAG_KEY = "my_key";
   private static final String S3_DELETE_TAG_VALUE = "my_value";
 
+  @SuppressWarnings("MethodLength")
   @Test
   public void testS3FileIOPropertiesDefaultValues() {
     S3FileIOProperties s3FileIOProperties = new S3FileIOProperties();
@@ -69,6 +74,9 @@ public class TestS3FileIOProperties {
 
     assertThat(S3FileIOProperties.DUALSTACK_ENABLED_DEFAULT)
         .isEqualTo(s3FileIOProperties.isDualStackEnabled());
+
+    assertThat(S3FileIOProperties.CROSS_REGION_ACCESS_ENABLED_DEFAULT)
+        .isEqualTo(s3FileIOProperties.isCrossRegionAccessEnabled());
 
     assertThat(S3FileIOProperties.PATH_STYLE_ACCESS_DEFAULT)
         .isEqualTo(s3FileIOProperties.isPathStyleAccess());
@@ -117,8 +125,18 @@ public class TestS3FileIOProperties {
         .isEqualTo(s3FileIOProperties.isDeleteEnabled());
 
     assertThat(Collections.emptyMap()).isEqualTo(s3FileIOProperties.bucketToAccessPointMapping());
+
+    assertThat(S3FileIOProperties.S3_CRT_MAX_CONCURRENCY_DEFAULT)
+        .isEqualTo(s3FileIOProperties.s3CrtMaxConcurrency());
+
+    assertThat(S3FileIOProperties.S3_CRT_ENABLED_DEFAULT)
+        .isEqualTo(s3FileIOProperties.isS3CRTEnabled());
+
+    assertThat(S3FileIOProperties.S3_ANALYTICS_ACCELERATOR_ENABLED_DEFAULT)
+        .isEqualTo(s3FileIOProperties.isS3AnalyticsAcceleratorEnabled());
   }
 
+  @SuppressWarnings("MethodLength")
   @Test
   public void testS3FileIOProperties() {
     Map<String, String> map = getTestProperties();
@@ -152,6 +170,11 @@ public class TestS3FileIOProperties {
         .containsEntry(
             S3FileIOProperties.DUALSTACK_ENABLED,
             String.valueOf(s3FileIOProperties.isDualStackEnabled()));
+
+    assertThat(map)
+        .containsEntry(
+            S3FileIOProperties.CROSS_REGION_ACCESS_ENABLED,
+            String.valueOf(s3FileIOProperties.isCrossRegionAccessEnabled()));
 
     assertThat(map)
         .containsEntry(
@@ -255,6 +278,20 @@ public class TestS3FileIOProperties {
             String.valueOf(s3FileIOProperties.isRemoteSigningEnabled()));
 
     assertThat(map).containsEntry(S3FileIOProperties.WRITE_STORAGE_CLASS, "INTELLIGENT_TIERING");
+
+    assertThat(map)
+        .containsEntry(
+            S3FileIOProperties.S3_CRT_MAX_CONCURRENCY,
+            String.valueOf(s3FileIOProperties.s3CrtMaxConcurrency()));
+
+    assertThat(map)
+        .containsEntry(
+            S3FileIOProperties.S3_CRT_ENABLED, String.valueOf(s3FileIOProperties.isS3CRTEnabled()));
+
+    assertThat(map)
+        .containsEntry(
+            S3FileIOProperties.S3_ANALYTICS_ACCELERATOR_ENABLED,
+            String.valueOf(s3FileIOProperties.isS3AnalyticsAcceleratorEnabled()));
   }
 
   @Test
@@ -380,6 +417,7 @@ public class TestS3FileIOProperties {
     map.put(S3FileIOProperties.USE_ARN_REGION_ENABLED, "true");
     map.put(S3FileIOProperties.ACCELERATION_ENABLED, "true");
     map.put(S3FileIOProperties.DUALSTACK_ENABLED, "true");
+    map.put(S3FileIOProperties.CROSS_REGION_ACCESS_ENABLED, "true");
     map.put(
         S3FileIOProperties.MULTIPART_SIZE,
         String.valueOf(S3FileIOProperties.MULTIPART_SIZE_DEFAULT));
@@ -401,6 +439,9 @@ public class TestS3FileIOProperties {
     map.put(S3FileIOProperties.PRELOAD_CLIENT_ENABLED, "true");
     map.put(S3FileIOProperties.REMOTE_SIGNING_ENABLED, "true");
     map.put(S3FileIOProperties.WRITE_STORAGE_CLASS, "INTELLIGENT_TIERING");
+    map.put(S3FileIOProperties.S3_CRT_MAX_CONCURRENCY, "200");
+    map.put(S3FileIOProperties.S3_CRT_ENABLED, "false");
+    map.put(S3FileIOProperties.S3_ANALYTICS_ACCELERATOR_ENABLED, "true");
     return map;
   }
 
@@ -425,6 +466,7 @@ public class TestS3FileIOProperties {
   public void testApplyS3ServiceConfigurations() {
     Map<String, String> properties = Maps.newHashMap();
     properties.put(S3FileIOProperties.DUALSTACK_ENABLED, "true");
+    properties.put(S3FileIOProperties.CROSS_REGION_ACCESS_ENABLED, "true");
     properties.put(S3FileIOProperties.PATH_STYLE_ACCESS, "true");
     properties.put(S3FileIOProperties.USE_ARN_REGION_ENABLED, "true");
     // acceleration enabled has to be set to false if path style is true
@@ -436,6 +478,7 @@ public class TestS3FileIOProperties {
         ArgumentCaptor.forClass(S3Configuration.class);
 
     Mockito.doReturn(mockA).when(mockA).dualstackEnabled(Mockito.anyBoolean());
+    Mockito.doReturn(mockA).when(mockA).crossRegionAccessEnabled(Mockito.anyBoolean());
     Mockito.doReturn(mockA).when(mockA).serviceConfiguration(Mockito.any(S3Configuration.class));
 
     s3FileIOProperties.applyServiceConfigurations(mockA);
@@ -476,9 +519,17 @@ public class TestS3FileIOProperties {
     properties.put(S3FileIOProperties.ENDPOINT, "endpoint");
     S3FileIOProperties s3FileIOProperties = new S3FileIOProperties(properties);
     S3ClientBuilder mockS3ClientBuilder = Mockito.mock(S3ClientBuilder.class);
+    S3AsyncClientBuilder mockS3AsyncClientBuilder = Mockito.mock(S3AsyncClientBuilder.class);
+    S3CrtAsyncClientBuilder mockS3CrtAsyncClientBuilder =
+        Mockito.mock(S3CrtAsyncClientBuilder.class);
 
     s3FileIOProperties.applyEndpointConfigurations(mockS3ClientBuilder);
+    s3FileIOProperties.applyEndpointConfigurations(mockS3AsyncClientBuilder);
+    s3FileIOProperties.applyEndpointConfigurations(mockS3CrtAsyncClientBuilder);
+
     Mockito.verify(mockS3ClientBuilder).endpointOverride(Mockito.any(URI.class));
+    Mockito.verify(mockS3AsyncClientBuilder).endpointOverride(Mockito.any(URI.class));
+    Mockito.verify(mockS3CrtAsyncClientBuilder).endpointOverride(Mockito.any(URI.class));
   }
 
   @Test
@@ -490,5 +541,29 @@ public class TestS3FileIOProperties {
 
     Mockito.verify(mockS3ClientBuilder)
         .overrideConfiguration(Mockito.any(ClientOverrideConfiguration.class));
+  }
+
+  @Test
+  public void testApplyS3CrtConfigurations() {
+    Map<String, String> properties = Maps.newHashMap();
+    S3FileIOProperties s3FileIOProperties = new S3FileIOProperties(properties);
+    S3CrtAsyncClientBuilder mockS3CrtAsyncClientBuilder =
+        Mockito.mock(S3CrtAsyncClientBuilder.class);
+    s3FileIOProperties.applyS3CrtConfigurations(mockS3CrtAsyncClientBuilder);
+
+    Mockito.verify(mockS3CrtAsyncClientBuilder).maxConcurrency(Mockito.any(Integer.class));
+  }
+
+  @Test
+  public void testApplyRetryConfiguration() {
+    Map<String, String> properties = Maps.newHashMap();
+    properties.put(S3FileIOProperties.S3_RETRY_NUM_RETRIES, "999");
+    S3FileIOProperties s3FileIOProperties = new S3FileIOProperties(properties);
+
+    S3ClientBuilder builder = S3Client.builder();
+    s3FileIOProperties.applyRetryConfigurations(builder);
+
+    RetryPolicy retryPolicy = builder.overrideConfiguration().retryPolicy().get();
+    assertThat(retryPolicy.numRetries()).as("retries was not set").isEqualTo(999);
   }
 }

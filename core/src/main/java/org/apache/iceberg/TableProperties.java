@@ -244,15 +244,20 @@ public class TableProperties {
   public static final String OBJECT_STORE_ENABLED = "write.object-storage.enabled";
   public static final boolean OBJECT_STORE_ENABLED_DEFAULT = false;
 
+  // Excludes the partition values in the path when set to true and object store is enabled
+  public static final String WRITE_OBJECT_STORE_PARTITIONED_PATHS =
+      "write.object-storage.partitioned-paths";
+  public static final boolean WRITE_OBJECT_STORE_PARTITIONED_PATHS_DEFAULT = true;
+
   /**
-   * @deprecated Use {@link #WRITE_DATA_LOCATION} instead.
+   * @deprecated will be removed in 2.0.0, use {@link #WRITE_DATA_LOCATION} instead.
    */
   @Deprecated public static final String OBJECT_STORE_PATH = "write.object-storage.path";
 
   public static final String WRITE_LOCATION_PROVIDER_IMPL = "write.location-provider.impl";
 
   /**
-   * @deprecated Use {@link #WRITE_DATA_LOCATION} instead.
+   * @deprecated will be removed in 2.0.0, use {@link #WRITE_DATA_LOCATION} instead.
    */
   @Deprecated
   public static final String WRITE_FOLDER_STORAGE_LOCATION = "write.folder-storage.path";
@@ -383,4 +388,11 @@ public class TableProperties {
   public static final int ENCRYPTION_DEK_LENGTH_DEFAULT = 16;
 
   public static final int ENCRYPTION_AAD_LENGTH_DEFAULT = 16;
+
+  /**
+   * Property to enable row lineage.
+   *
+   * @deprecated will be removed in 1.10.0; row lineage is required for all v3+ tables.
+   */
+  @Deprecated public static final String ROW_LINEAGE = "row-lineage";
 }

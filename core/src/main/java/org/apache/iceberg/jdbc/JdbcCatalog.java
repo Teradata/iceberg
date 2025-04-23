@@ -31,6 +31,7 @@ import java.sql.SQLTransientConnectionException;
 import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -65,6 +66,7 @@ import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.util.LocationUtil;
 import org.apache.iceberg.util.PropertyUtil;
 import org.apache.iceberg.view.BaseMetastoreViewCatalog;
+import org.apache.iceberg.view.ViewMetadata;
 import org.apache.iceberg.view.ViewOperations;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -150,6 +152,7 @@ public class JdbcCatalog extends BaseMetastoreViewCatalog
     this.closeableGroup = new CloseableGroup();
     closeableGroup.addCloseable(metricsReporter());
     closeableGroup.addCloseable(connections);
+    closeableGroup.addCloseable(io);
     closeableGroup.setSuppressCloseFailure(true);
   }
 
@@ -611,6 +614,14 @@ public class JdbcCatalog extends BaseMetastoreViewCatalog
       throw new UnsupportedOperationException(VIEW_WARNING_LOG_MESSAGE);
     }
 
+    JdbcViewOperations ops = (JdbcViewOperations) newViewOps(identifier);
+    ViewMetadata lastViewMetadata = null;
+    try {
+      lastViewMetadata = ops.current();
+    } catch (NotFoundException e) {
+      LOG.warn("Failed to load view metadata for view: {}", identifier, e);
+    }
+
     int deletedRecords =
         execute(
             JdbcUtil.DROP_VIEW_SQL,
@@ -621,6 +632,10 @@ public class JdbcCatalog extends BaseMetastoreViewCatalog
     if (deletedRecords == 0) {
       LOG.info("Skipping drop, view does not exist: {}", identifier);
       return false;
+    }
+
+    if (lastViewMetadata != null) {
+      CatalogUtil.dropViewMetadata(ops.io(), lastViewMetadata);
     }
 
     LOG.info("Dropped view: {}", identifier);
@@ -798,7 +813,11 @@ public class JdbcCatalog extends BaseMetastoreViewCatalog
     }
 
     throw new IllegalStateException(
-        String.format("Failed to insert: %d of %d succeeded", insertedRecords, properties.size()));
+        String.format(
+            Locale.ROOT,
+            "Failed to insert: %d of %d succeeded",
+            insertedRecords,
+            properties.size()));
   }
 
   private boolean updateProperties(Namespace namespace, Map<String, String> properties) {
@@ -818,7 +837,11 @@ public class JdbcCatalog extends BaseMetastoreViewCatalog
     }
 
     throw new IllegalStateException(
-        String.format("Failed to update: %d of %d succeeded", updatedRecords, properties.size()));
+        String.format(
+            Locale.ROOT,
+            "Failed to update: %d of %d succeeded",
+            updatedRecords,
+            properties.size()));
   }
 
   private boolean deleteProperties(Namespace namespace, Set<String> properties) {

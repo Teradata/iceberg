@@ -36,7 +36,9 @@ import com.github.benmanes.caffeine.cache.LoadingCache;
 import java.io.IOException;
 import java.math.RoundingMode;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
@@ -71,12 +73,19 @@ import org.apache.iceberg.relocated.com.google.common.collect.Queues;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 import org.apache.iceberg.relocated.com.google.common.math.IntMath;
 import org.apache.iceberg.util.Exceptions;
+import org.apache.iceberg.util.PropertyUtil;
 import org.apache.iceberg.util.SnapshotUtil;
 import org.apache.iceberg.util.Tasks;
 import org.apache.iceberg.util.ThreadPools;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Keeps common functionality to create a new snapshot.
+ *
+ * <p>The number of attempted commits is controlled by {@link TableProperties#COMMIT_NUM_RETRIES}
+ * and {@link TableProperties#COMMIT_NUM_RETRIES_DEFAULT} properties.
+ */
 @SuppressWarnings("UnnecessaryAnonymousClass")
 abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
   private static final Logger LOG = LoggerFactory.getLogger(SnapshotProducer.class);
@@ -109,7 +118,7 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
   private boolean stageOnly = false;
   private Consumer<String> deleteFunc = defaultDelete;
 
-  private ExecutorService workerPool = ThreadPools.getWorkerPool();
+  private ExecutorService workerPool;
   private String targetBranch = SnapshotRef.MAIN_BRANCH;
   private CommitMetrics commitMetrics;
 
@@ -150,6 +159,10 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
     return self();
   }
 
+  protected TableOperations ops() {
+    return ops;
+  }
+
   protected CommitMetrics commitMetrics() {
     if (commitMetrics == null) {
       this.commitMetrics = CommitMetrics.of(new DefaultMetricsContext());
@@ -183,7 +196,11 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
   }
 
   protected ExecutorService workerPool() {
-    return this.workerPool;
+    if (workerPool == null) {
+      this.workerPool = ThreadPools.getWorkerPool();
+    }
+
+    return workerPool;
   }
 
   @Override
@@ -245,14 +262,16 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
 
     OutputFile manifestList = manifestListPath();
 
-    try (ManifestListWriter writer =
+    ManifestListWriter writer =
         ManifestLists.write(
             ops.current().formatVersion(),
             manifestList,
             snapshotId(),
             parentSnapshotId,
-            sequenceNumber)) {
+            sequenceNumber,
+            base.nextRowId());
 
+    try (writer) {
       // keep track of the manifest lists created
       manifestLists.add(manifestList.location());
 
@@ -261,12 +280,36 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
       Tasks.range(manifestFiles.length)
           .stopOnFailure()
           .throwFailureWhenFinished()
-          .executeWith(workerPool)
+          .executeWith(workerPool())
           .run(index -> manifestFiles[index] = manifestsWithMetadata.get(manifests.get(index)));
 
       writer.addAll(Arrays.asList(manifestFiles));
     } catch (IOException e) {
       throw new RuntimeIOException(e, "Failed to write manifest list file");
+    }
+
+    Long nextRowId = null;
+    Long assignedRows = null;
+    if (base.formatVersion() >= 3) {
+      nextRowId = base.nextRowId();
+      assignedRows = writer.nextRowId() - base.nextRowId();
+    }
+
+    Map<String, String> summary = summary();
+    String operation = operation();
+
+    if (summary != null && DataOperations.REPLACE.equals(operation)) {
+      long addedRecords =
+          PropertyUtil.propertyAsLong(summary, SnapshotSummary.ADDED_RECORDS_PROP, 0L);
+      long replacedRecords =
+          PropertyUtil.propertyAsLong(summary, SnapshotSummary.DELETED_RECORDS_PROP, 0L);
+
+      // added may be less than replaced when records are already deleted by delete files
+      Preconditions.checkArgument(
+          addedRecords <= replacedRecords,
+          "Invalid REPLACE operation: %s added records > %s replaced records",
+          addedRecords,
+          replacedRecords);
     }
 
     return new BaseSnapshot(
@@ -277,7 +320,9 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
         operation(),
         summary(base),
         base.currentSchemaId(),
-        manifestList.location());
+        manifestList.location(),
+        nextRowId,
+        assignedRows);
   }
 
   protected abstract Map<String, String> summary();
@@ -505,7 +550,11 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
             ops.metadataFileLocation(
                 FileFormat.AVRO.addExtension(
                     String.format(
-                        "snap-%d-%d-%s", snapshotId(), attempt.incrementAndGet(), commitUUID))));
+                        Locale.ROOT,
+                        "snap-%d-%d-%s",
+                        snapshotId(),
+                        attempt.incrementAndGet(),
+                        commitUUID))));
   }
 
   protected EncryptedOutputFile newManifestOutputFile() {
@@ -562,17 +611,17 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
     return true;
   }
 
-  protected List<ManifestFile> writeDataManifests(List<DataFile> files, PartitionSpec spec) {
+  protected List<ManifestFile> writeDataManifests(Collection<DataFile> files, PartitionSpec spec) {
     return writeDataManifests(files, null /* inherit data seq */, spec);
   }
 
   protected List<ManifestFile> writeDataManifests(
-      List<DataFile> files, Long dataSeq, PartitionSpec spec) {
+      Collection<DataFile> files, Long dataSeq, PartitionSpec spec) {
     return writeManifests(files, group -> writeDataFileGroup(group, dataSeq, spec));
   }
 
   private List<ManifestFile> writeDataFileGroup(
-      List<DataFile> files, Long dataSeq, PartitionSpec spec) {
+      Collection<DataFile> files, Long dataSeq, PartitionSpec spec) {
     RollingManifestWriter<DataFile> writer = newRollingManifestWriter(spec);
 
     try (RollingManifestWriter<DataFile> closableWriter = writer) {
@@ -589,20 +638,23 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
   }
 
   protected List<ManifestFile> writeDeleteManifests(
-      List<DeleteFileHolder> files, PartitionSpec spec) {
+      Collection<DeleteFile> files, PartitionSpec spec) {
     return writeManifests(files, group -> writeDeleteFileGroup(group, spec));
   }
 
   private List<ManifestFile> writeDeleteFileGroup(
-      List<DeleteFileHolder> files, PartitionSpec spec) {
+      Collection<DeleteFile> files, PartitionSpec spec) {
     RollingManifestWriter<DeleteFile> writer = newRollingDeleteManifestWriter(spec);
 
     try (RollingManifestWriter<DeleteFile> closableWriter = writer) {
-      for (DeleteFileHolder file : files) {
+      for (DeleteFile file : files) {
+        Preconditions.checkArgument(
+            file instanceof Delegates.PendingDeleteFile,
+            "Invalid delete file: must be PendingDeleteFile");
         if (file.dataSequenceNumber() != null) {
-          closableWriter.add(file.deleteFile(), file.dataSequenceNumber());
+          closableWriter.add(file, file.dataSequenceNumber());
         } else {
-          closableWriter.add(file.deleteFile());
+          closableWriter.add(file);
         }
       }
     } catch (IOException e) {
@@ -613,7 +665,7 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
   }
 
   private static <F> List<ManifestFile> writeManifests(
-      List<F> files, Function<List<F>, List<ManifestFile>> writeFunc) {
+      Collection<F> files, Function<List<F>, List<ManifestFile>> writeFunc) {
     int parallelism = manifestWriterCount(ThreadPools.WORKER_THREAD_POOL_SIZE, files.size());
     List<List<F>> groups = divide(files, parallelism);
     Queue<ManifestFile> manifests = Queues.newConcurrentLinkedQueue();
@@ -625,7 +677,8 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
     return ImmutableList.copyOf(manifests);
   }
 
-  private static <T> List<List<T>> divide(List<T> list, int groupCount) {
+  private static <T> List<List<T>> divide(Collection<T> collection, int groupCount) {
+    List<T> list = Lists.newArrayList(collection);
     int groupSize = IntMath.divide(list.size(), groupCount, RoundingMode.CEILING);
     return Lists.partition(list, groupSize);
   }
@@ -699,13 +752,14 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
           manifest.sequenceNumber(),
           manifest.minSequenceNumber(),
           snapshotId,
+          stats.summaries(),
+          null,
           addedFiles,
           addedRows,
           existingFiles,
           existingRows,
           deletedFiles,
           deletedRows,
-          stats.summaries(),
           null);
 
     } catch (IOException e) {
@@ -745,19 +799,22 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
     }
   }
 
-  protected static class DeleteFileHolder {
-    private final DeleteFile deleteFile;
-    private final Long dataSequenceNumber;
-
+  /**
+   * A wrapper to set the dataSequenceNumber of a DeleteFile.
+   *
+   * @deprecated will be removed in 1.10.0; use {@link Delegates#pendingDeleteFile(DeleteFile,
+   *     Long)} instead.
+   */
+  @Deprecated
+  protected static class PendingDeleteFile extends Delegates.PendingDeleteFile {
     /**
      * Wrap a delete file for commit with a given data sequence number.
      *
      * @param deleteFile delete file
      * @param dataSequenceNumber data sequence number to apply
      */
-    DeleteFileHolder(DeleteFile deleteFile, long dataSequenceNumber) {
-      this.deleteFile = deleteFile;
-      this.dataSequenceNumber = dataSequenceNumber;
+    PendingDeleteFile(DeleteFile deleteFile, long dataSequenceNumber) {
+      super(deleteFile, dataSequenceNumber);
     }
 
     /**
@@ -765,17 +822,13 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
      *
      * @param deleteFile delete file
      */
-    DeleteFileHolder(DeleteFile deleteFile) {
-      this.deleteFile = deleteFile;
-      this.dataSequenceNumber = null;
+    PendingDeleteFile(DeleteFile deleteFile) {
+      super(deleteFile, null);
     }
 
-    public DeleteFile deleteFile() {
-      return deleteFile;
-    }
-
-    public Long dataSequenceNumber() {
-      return dataSequenceNumber;
+    @Override
+    PendingDeleteFile wrap(DeleteFile file) {
+      return new PendingDeleteFile(file, dataSequenceNumber());
     }
   }
 }

@@ -99,12 +99,12 @@ public class TestTagDDL extends ExtensionsTestBase {
                     "ALTER TABLE %s CREATE TAG %s AS OF VERSION %d RETAIN",
                     tableName, tagName, firstSnapshotId, maxRefAge))
         .isInstanceOf(IcebergParseException.class)
-        .hasMessageContaining("mismatched input");
+        .hasMessageContaining("no viable alternative at input '<EOF>'");
 
     assertThatThrownBy(
             () -> sql("ALTER TABLE %s CREATE TAG %s RETAIN %s DAYS", tableName, tagName, "abc"))
         .isInstanceOf(IcebergParseException.class)
-        .hasMessageContaining("mismatched input");
+        .hasMessageContaining("no viable alternative at input 'abc'");
 
     assertThatThrownBy(
             () ->
@@ -151,7 +151,7 @@ public class TestTagDDL extends ExtensionsTestBase {
 
     assertThatThrownBy(() -> sql("ALTER TABLE %s CREATE TAG %s", tableName, "123"))
         .isInstanceOf(IcebergParseException.class)
-        .hasMessageContaining("mismatched input '123'");
+        .hasMessageContaining("no viable alternative at input '123'");
 
     table.manageSnapshots().removeTag(tagName).commit();
     List<SimpleRecord> records =
@@ -291,19 +291,18 @@ public class TestTagDDL extends ExtensionsTestBase {
     String tagName = "t1";
     table.manageSnapshots().createTag(tagName, table.currentSnapshot().snapshotId()).commit();
     SnapshotRef ref = table.refs().get(tagName);
-    assertThat(ref.snapshotId()).as("").isEqualTo(table.currentSnapshot().snapshotId());
+    assertThat(ref.snapshotId()).isEqualTo(table.currentSnapshot().snapshotId());
 
     sql("ALTER TABLE %s DROP TAG %s", tableName, tagName);
     table.refresh();
-    ref = table.refs().get(tagName);
-    assertThat(ref).as("The tag needs to be dropped.").isNull();
+    assertThat(table.refs()).doesNotContainKey(tagName);
   }
 
   @TestTemplate
   public void testDropTagNonConformingName() {
     assertThatThrownBy(() -> sql("ALTER TABLE %s DROP TAG %s", tableName, "123"))
         .isInstanceOf(IcebergParseException.class)
-        .hasMessageContaining("mismatched input '123'");
+        .hasMessageContaining("no viable alternative at input '123'");
   }
 
   @TestTemplate
@@ -328,11 +327,11 @@ public class TestTagDDL extends ExtensionsTestBase {
   public void testDropTagIfExists() throws NoSuchTableException {
     String tagName = "nonExistingTag";
     Table table = insertRows();
-    assertThat(table.refs().get(tagName)).as("The tag does not exists.").isNull();
+    assertThat(table.refs()).doesNotContainKey(tagName);
 
     sql("ALTER TABLE %s DROP TAG IF EXISTS %s", tableName, tagName);
     table.refresh();
-    assertThat(table.refs().get(tagName)).as("The tag still does not exist.").isNull();
+    assertThat(table.refs()).doesNotContainKey(tagName);
 
     table.manageSnapshots().createTag(tagName, table.currentSnapshot().snapshotId()).commit();
     assertThat(table.refs().get(tagName).snapshotId())
@@ -341,7 +340,7 @@ public class TestTagDDL extends ExtensionsTestBase {
 
     sql("ALTER TABLE %s DROP TAG IF EXISTS %s", tableName, tagName);
     table.refresh();
-    assertThat(table.refs().get(tagName)).as("The tag needs to be dropped.").isNull();
+    assertThat(table.refs()).doesNotContainKey(tagName);
   }
 
   @TestTemplate
