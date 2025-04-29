@@ -57,6 +57,9 @@ project(':iceberg-hive-runtime') {
   shadowJar {
     configurations = [project.configurations.runtimeClasspath]
 
+    exclude 'META-INF/versions/21/**'
+    exclude 'META-INF/versions/22/**'
+
     zip64 true
 
     // include the LICENSE and NOTICE files for the shaded Jar

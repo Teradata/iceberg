@@ -129,6 +129,9 @@ project(":iceberg-flink:iceberg-flink-runtime-${flinkMajorVersion}") {
 
   tasks.jar.dependsOn tasks.shadowJar
 
+  exclude 'META-INF/versions/21/**'
+  exclude 'META-INF/versions/22/**'
+
   sourceSets {
     integration {
       java.srcDir "$projectDir/src/integration/java"
