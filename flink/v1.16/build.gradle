@@ -129,9 +129,6 @@ project(":iceberg-flink:iceberg-flink-runtime-${flinkMajorVersion}") {
 
   tasks.jar.dependsOn tasks.shadowJar
 
-  exclude 'META-INF/versions/21/**'
-  exclude 'META-INF/versions/22/**'
-
   sourceSets {
     integration {
       java.srcDir "$projectDir/src/integration/java"
@@ -227,6 +224,9 @@ project(":iceberg-flink:iceberg-flink-runtime-${flinkMajorVersion}") {
     configurations = [project.configurations.runtimeClasspath]
 
     zip64 true
+
+    exclude 'META-INF/versions/21/**'
+    exclude 'META-INF/versions/22/**'
 
     // include the LICENSE and NOTICE files for the shaded Jar
     from(projectDir) {
