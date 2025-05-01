@@ -225,6 +225,9 @@ project(":iceberg-flink:iceberg-flink-runtime-${flinkMajorVersion}") {
 
     zip64 true
 
+    exclude 'META-INF/versions/21/**'
+    exclude 'META-INF/versions/22/**'
+
     // include the LICENSE and NOTICE files for the shaded Jar
     from(projectDir) {
       include 'LICENSE'
