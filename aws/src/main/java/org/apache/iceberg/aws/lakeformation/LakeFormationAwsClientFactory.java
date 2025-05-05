@@ -82,8 +82,7 @@ public class LakeFormationAwsClientFactory extends AssumeRoleAwsClientFactory {
           .applyMutation(s3FileIOProperties()::applyEndpointConfigurations)
           .applyMutation(s3FileIOProperties()::applyServiceConfigurations)
           .applyMutation(s3FileIOProperties()::applyRetryConfigurations)
-          .credentialsProvider(
-              new LakeFormationCredentialsProvider(lakeFormation(), buildTableArn()))
+          .credentialsProvider(lakeFormationCredentialsProvider())
           .region(Region.of(region()))
           .build();
     } else {
@@ -97,8 +96,7 @@ public class LakeFormationAwsClientFactory extends AssumeRoleAwsClientFactory {
       return KmsClient.builder()
           .applyMutation(httpClientProperties()::applyHttpClientConfigurations)
           .applyMutation(awsClientProperties()::applyRetryConfigurations)
-          .credentialsProvider(
-              new LakeFormationCredentialsProvider(lakeFormation(), buildTableArn()))
+          .credentialsProvider(lakeFormationCredentialsProvider())
           .region(Region.of(region()))
           .build();
     } else {
@@ -106,7 +104,7 @@ public class LakeFormationAwsClientFactory extends AssumeRoleAwsClientFactory {
     }
   }
 
-  private boolean isTableRegisteredWithLakeFormation() {
+  protected boolean isTableRegisteredWithLakeFormation() {
     Preconditions.checkArgument(
         dbName != null && !dbName.isEmpty(), "Database name can not be empty");
     Preconditions.checkArgument(
@@ -120,10 +118,17 @@ public class LakeFormationAwsClientFactory extends AssumeRoleAwsClientFactory {
                     .databaseName(dbName)
                     .name(tableName)
                     .build());
-    return response.table().isRegisteredWithLakeFormation();
+    boolean isRegisteredWithLakeFormation = response.table().isRegisteredWithLakeFormation();
+    if (isRegisteredWithLakeFormation) {
+      // set the Glue account id, if not set
+      if (this.glueAccountId == null) {
+        this.glueAccountId = response.table().catalogId();
+      }
+    }
+    return isRegisteredWithLakeFormation;
   }
 
-  private String buildTableArn() {
+  protected String buildTableArn() {
     Preconditions.checkArgument(
         glueAccountId != null && !glueAccountId.isEmpty(),
         "%s can not be empty",
@@ -133,11 +138,15 @@ public class LakeFormationAwsClientFactory extends AssumeRoleAwsClientFactory {
         "arn:%s:glue:%s:%s:table/%s/%s", partitionName, region(), glueAccountId, dbName, tableName);
   }
 
-  private LakeFormationClient lakeFormation() {
+  protected LakeFormationClient lakeFormation() {
     return LakeFormationClient.builder()
         .applyMutation(this::applyAssumeRoleConfigurations)
         .applyMutation(httpClientProperties()::applyHttpClientConfigurations)
         .build();
+  }
+
+  protected AwsCredentialsProvider lakeFormationCredentialsProvider() {
+    return new LakeFormationCredentialsProvider(lakeFormation(), buildTableArn());
   }
 
   static class LakeFormationCredentialsProvider implements AwsCredentialsProvider {
