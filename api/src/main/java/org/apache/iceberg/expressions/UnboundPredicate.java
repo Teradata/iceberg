@@ -46,6 +46,11 @@ public class UnboundPredicate<T> extends Predicate<T, UnboundTerm<T>>
     this.literals = null;
   }
 
+  UnboundPredicate(Operation op, UnboundTerm<T> term, UnboundTerm<T> rightTerm) {
+    super(op, term, rightTerm);
+    this.literals = null;
+  }
+
   UnboundPredicate(Operation op, UnboundTerm<T> term, Literal<T> lit) {
     super(op, term);
     this.literals = Lists.newArrayList(lit);
@@ -68,6 +73,9 @@ public class UnboundPredicate<T> extends Predicate<T, UnboundTerm<T>>
 
   @Override
   public Expression negate() {
+    if (rightTerm() != null) {
+      return new UnboundPredicate<>(op().negate(), term(), rightTerm());
+    }
     return new UnboundPredicate<>(op().negate(), term(), literals);
   }
 
@@ -111,8 +119,13 @@ public class UnboundPredicate<T> extends Predicate<T, UnboundTerm<T>>
   public Expression bind(StructType struct, boolean caseSensitive) {
     BoundTerm<T> bound = term().bind(struct, caseSensitive);
 
-    if (literals == null) {
+    if (literals == null && rightTerm() == null) {
       return bindUnaryOperation(bound);
+    }
+
+    if (rightTerm() != null) {
+      BoundTerm<T> rightBound = rightTerm().bind(struct, caseSensitive);
+      return bindTermOperation(bound, rightBound);
     }
 
     if (op() == Operation.IN || op() == Operation.NOT_IN) {
@@ -120,6 +133,20 @@ public class UnboundPredicate<T> extends Predicate<T, UnboundTerm<T>>
     }
 
     return bindLiteralOperation(bound);
+  }
+
+  private Expression bindTermOperation(BoundTerm<T> bound, BoundTerm<T> rightBound) {
+    switch (op()) {
+      case LT:
+      case LT_EQ:
+      case GT:
+      case GT_EQ:
+      case EQ:
+      case NOT_EQ:
+        return new BoundTermPredicate<>(op(), bound, rightBound);
+      default:
+        throw new ValidationException("Operation must be LT, LT_EQ, GT, GT_EQ, EQ, NOT_EQ");
+    }
   }
 
   private Expression bindUnaryOperation(BoundTerm<T> boundTerm) {
@@ -261,17 +288,17 @@ public class UnboundPredicate<T> extends Predicate<T, UnboundTerm<T>>
       case NOT_NAN:
         return "not_nan(" + term() + ")";
       case LT:
-        return term() + " < " + literal();
+        return term() + " < " + (rightTerm() == null ? literal() : rightTerm());
       case LT_EQ:
-        return term() + " <= " + literal();
+        return term() + " <= " + (rightTerm() == null ? literal() : rightTerm());
       case GT:
-        return term() + " > " + literal();
+        return term() + " > " + (rightTerm() == null ? literal() : rightTerm());
       case GT_EQ:
-        return term() + " >= " + literal();
+        return term() + " >= " + (rightTerm() == null ? literal() : rightTerm());
       case EQ:
-        return term() + " == " + literal();
+        return term() + " == " + (rightTerm() == null ? literal() : rightTerm());
       case NOT_EQ:
-        return term() + " != " + literal();
+        return term() + " != " + (rightTerm() == null ? literal() : rightTerm());
       case STARTS_WITH:
         return term() + " startsWith \"" + literal() + "\"";
       case NOT_STARTS_WITH:
