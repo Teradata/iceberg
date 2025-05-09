@@ -226,6 +226,31 @@ public class InclusiveMetricsEvaluator {
     }
 
     @Override
+    public <T> Boolean lt(Bound<T> ref, Bound<T> ref2) {
+      BoundReference<?> bref = ref.ref();
+      BoundReference<?> bref2 = ref2.ref();
+      Integer id = bref.fieldId();
+      Integer id2 = bref2.fieldId();
+
+      if (containsNullsOnly(id)
+          || containsNaNsOnly(id)
+          || containsNullsOnly(id2)
+          || containsNaNsOnly(id2)) {
+        return ROWS_CANNOT_MATCH;
+      }
+
+      if (bref.type().typeId() != bref2.type().typeId()) {
+        return ROWS_MIGHT_MATCH;
+      }
+
+      if (checkLowerToUpperBounds(ref, ref2, id, id2, cmp -> cmp >= 0)) {
+        return ROWS_CANNOT_MATCH;
+      }
+
+      return ROWS_MIGHT_MATCH;
+    }
+
+    @Override
     public <T> Boolean ltEq(Bound<T> term, Literal<T> lit) {
       // all terms are null preserving. see #isNullPreserving(Bound)
       Integer id = term.ref().fieldId();
@@ -246,6 +271,23 @@ public class InclusiveMetricsEvaluator {
       // f(lower) > X means rows cannot match
       int cmp = lit.comparator().compare(lower, lit.value());
       if (cmp > 0) {
+        return ROWS_CANNOT_MATCH;
+      }
+
+      return ROWS_MIGHT_MATCH;
+    }
+
+    @Override
+    public <T> Boolean ltEq(Bound<T> ref, Bound<T> ref2) {
+      BoundReference<?> bref = ref.ref();
+      BoundReference<?> bref2 = ref2.ref();
+      Integer id = bref.fieldId();
+      Integer id2 = bref2.fieldId();
+
+      if (containsNullsOnly(id)
+          || containsNaNsOnly(id)
+          || containsNullsOnly(id2)
+          || containsNaNsOnly(id2)) {
         return ROWS_CANNOT_MATCH;
       }
 
@@ -274,6 +316,31 @@ public class InclusiveMetricsEvaluator {
     }
 
     @Override
+    public <T> Boolean gt(Bound<T> ref, Bound<T> ref2) {
+      BoundReference<?> bref = ref.ref();
+      BoundReference<?> bref2 = ref2.ref();
+      Integer id = bref.fieldId();
+      Integer id2 = bref2.fieldId();
+
+      if (containsNullsOnly(id)
+          || containsNaNsOnly(id)
+          || containsNullsOnly(id2)
+          || containsNaNsOnly(id2)) {
+        return ROWS_CANNOT_MATCH;
+      }
+
+      if (bref.type().typeId() != bref2.type().typeId()) {
+        return ROWS_MIGHT_MATCH;
+      }
+
+      if (checkUpperToLowerBounds(ref, ref2, id, id2, cmp -> cmp <= 0)) {
+        return ROWS_CANNOT_MATCH;
+      }
+
+      return ROWS_MIGHT_MATCH;
+    }
+
+    @Override
     public <T> Boolean gtEq(Bound<T> term, Literal<T> lit) {
       // all terms are null preserving. see #isNullPreserving(Bound)
       Integer id = term.ref().fieldId();
@@ -288,6 +355,21 @@ public class InclusiveMetricsEvaluator {
 
       int cmp = lit.comparator().compare(upper, lit.value());
       if (cmp < 0) {
+        return ROWS_CANNOT_MATCH;
+      }
+
+      return ROWS_MIGHT_MATCH;
+    }
+
+    @Override
+    public <T> Boolean gtEq(Bound<T> ref, Bound<T> ref2) {
+      Integer id = ref.ref().fieldId();
+      Integer id2 = ref2.ref().fieldId();
+
+      if (containsNullsOnly(id)
+          || containsNaNsOnly(id)
+          || containsNullsOnly(id2)
+          || containsNaNsOnly(id2)) {
         return ROWS_CANNOT_MATCH;
       }
 
@@ -324,10 +406,86 @@ public class InclusiveMetricsEvaluator {
     }
 
     @Override
+    public <T> Boolean eq(Bound<T> ref, Bound<T> ref2) {
+      Integer id = ref.ref().fieldId();
+      Integer id2 = ref2.ref().fieldId();
+
+      if (containsNullsOnly(id)
+          || containsNaNsOnly(id)
+          || containsNullsOnly(id2)
+          || containsNaNsOnly(id2)) {
+        return ROWS_CANNOT_MATCH;
+      }
+
+      return ROWS_MIGHT_MATCH;
+    }
+
+    @Override
     public <T> Boolean notEq(Bound<T> term, Literal<T> lit) {
       // because the bounds are not necessarily a min or max value, this cannot be answered using
       // them. notEq(col, X) with (X, Y) doesn't guarantee that X is a value in col.
       return ROWS_MIGHT_MATCH;
+    }
+
+    @Override
+    public <T> Boolean notEq(Bound<T> ref, Bound<T> ref2) {
+      // because the bounds are not necessarily a min or max value, this cannot be answered using
+      // them. notEq(col, X) with (X, Y) doesn't guarantee that X is a value in col.
+      return ROWS_MIGHT_MATCH;
+    }
+
+    private <T> boolean checkLowerToUpperBounds(
+        Bound<T> ref,
+        Bound<T> ref2,
+        Integer id,
+        Integer id2,
+        java.util.function.Predicate<Integer> compare) {
+      if (lowerBounds != null
+          && upperBounds != null
+          && lowerBounds.containsKey(id)
+          && upperBounds.containsKey(id2)) {
+        T lower = Conversions.fromByteBuffer(ref.ref().type(), lowerBounds.get(id));
+        T upper = Conversions.fromByteBuffer(ref2.ref().type(), upperBounds.get(id2));
+
+        if (NaNUtil.isNaN(lower) || NaNUtil.isNaN(upper)) {
+          // NaN indicates unreliable bounds. See the InclusiveMetricsEvaluator docs for more.
+          return false;
+        }
+
+        Comparator<Object> comparator = Comparators.forType(ref.ref().type().asPrimitiveType());
+        int cmp = comparator.compare(lower, upper);
+        if (compare.test(cmp)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    private <T> boolean checkUpperToLowerBounds(
+        Bound<T> ref,
+        Bound<T> ref2,
+        Integer id,
+        Integer id2,
+        java.util.function.Predicate<Integer> compare) {
+      if (lowerBounds != null
+          && upperBounds != null
+          && upperBounds.containsKey(id)
+          && lowerBounds.containsKey(id2)) {
+        T upper = Conversions.fromByteBuffer(ref.ref().type(), upperBounds.get(id));
+        T lower = Conversions.fromByteBuffer(ref2.ref().type(), lowerBounds.get(id2));
+
+        if (NaNUtil.isNaN(lower) || NaNUtil.isNaN(upper)) {
+          // NaN indicates unreliable bounds. See the InclusiveMetricsEvaluator docs for more.
+          return false;
+        }
+
+        Comparator<Object> comparator = Comparators.forType(ref.ref().type().asPrimitiveType());
+        int cmp = comparator.compare(upper, lower);
+        if (compare.test(cmp)) {
+          return true;
+        }
+      }
+      return false;
     }
 
     @Override

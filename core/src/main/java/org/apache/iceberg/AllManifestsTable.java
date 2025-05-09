@@ -374,9 +374,16 @@ public class AllManifestsTable extends BaseMetadataTable {
         return ROWS_MIGHT_MATCH;
       }
 
+      // TODO implement ref to refs comparison
+
       @Override
       public <T> Boolean lt(BoundReference<T> ref, Literal<T> lit) {
         return compareSnapshotRef(ref, lit, compareResult -> compareResult < 0);
+      }
+
+      @Override
+      public <T> Boolean lt(BoundReference<T> ref, BoundReference<T> ref2) {
+        return ROWS_MIGHT_MATCH;
       }
 
       @Override
@@ -385,8 +392,18 @@ public class AllManifestsTable extends BaseMetadataTable {
       }
 
       @Override
+      public <T> Boolean ltEq(BoundReference<T> ref, BoundReference<T> ref2) {
+        return ROWS_MIGHT_MATCH;
+      }
+
+      @Override
       public <T> Boolean gt(BoundReference<T> ref, Literal<T> lit) {
         return compareSnapshotRef(ref, lit, compareResult -> compareResult > 0);
+      }
+
+      @Override
+      public <T> Boolean gt(BoundReference<T> ref, BoundReference<T> ref2) {
+        return ROWS_MIGHT_MATCH;
       }
 
       @Override
@@ -395,13 +412,28 @@ public class AllManifestsTable extends BaseMetadataTable {
       }
 
       @Override
+      public <T> Boolean gtEq(BoundReference<T> ref, BoundReference<T> ref2) {
+        return ROWS_MIGHT_MATCH;
+      }
+
+      @Override
       public <T> Boolean eq(BoundReference<T> ref, Literal<T> lit) {
         return compareSnapshotRef(ref, lit, compareResult -> compareResult == 0);
       }
 
       @Override
+      public <T> Boolean eq(BoundReference<T> ref, BoundReference<T> ref2) {
+        return ROWS_MIGHT_MATCH;
+      }
+
+      @Override
       public <T> Boolean notEq(BoundReference<T> ref, Literal<T> lit) {
         return compareSnapshotRef(ref, lit, compareResult -> compareResult != 0);
+      }
+
+      @Override
+      public <T> Boolean notEq(BoundReference<T> ref, BoundReference<T> ref2) {
+        return ROWS_MIGHT_MATCH;
       }
 
       @Override
