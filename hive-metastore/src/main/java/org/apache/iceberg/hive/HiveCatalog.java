@@ -104,12 +104,12 @@ public class HiveCatalog extends BaseMetastoreViewCatalog
     }
 
     if (properties.containsKey(CatalogProperties.URI)) {
-      this.conf.set(HiveConf.ConfVars.METASTOREURIS.varname, properties.get(CatalogProperties.URI));
+      this.conf.set("hive.metastore.uris", properties.get(CatalogProperties.URI));
     }
 
     if (properties.containsKey(CatalogProperties.WAREHOUSE_LOCATION)) {
       this.conf.set(
-          HiveConf.ConfVars.METASTOREWAREHOUSE.varname,
+          "hive.metastore.warehouse.dir",
           LocationUtil.stripTrailingSlash(properties.get(CatalogProperties.WAREHOUSE_LOCATION)));
     }
 
@@ -796,7 +796,7 @@ public class HiveCatalog extends BaseMetastoreViewCatalog
   public String toString() {
     return MoreObjects.toStringHelper(this)
         .add("name", name)
-        .add("uri", this.conf == null ? "" : this.conf.get(HiveConf.ConfVars.METASTOREURIS.varname))
+        .add("uri", this.conf == null ? "" : this.conf.get("hive.metastore.uris"))
         .toString();
   }
 
