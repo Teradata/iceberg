@@ -728,7 +728,7 @@ public class HiveCatalog extends BaseMetastoreViewCatalog
   }
 
   private String databaseLocation(String databaseName) {
-    String warehouseLocation = conf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
+    String warehouseLocation = conf.get("hive.metastore.warehouse.dir");
     Preconditions.checkNotNull(
         warehouseLocation, "Warehouse location is not set: hive.metastore.warehouse.dir=null");
     warehouseLocation = LocationUtil.stripTrailingSlash(warehouseLocation);
