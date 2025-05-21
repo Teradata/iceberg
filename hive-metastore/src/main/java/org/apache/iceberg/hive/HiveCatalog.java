@@ -81,6 +81,8 @@ public class HiveCatalog extends BaseMetastoreViewCatalog
 
   // MetastoreConf is not available with current Hive version
   static final String HIVE_CONF_CATALOG = "metastore.catalog.default";
+  static final String HIVE_METASTORE_WAREHOUSE_DIR = "hive.metastore.warehouse.dir";
+  static final String HIVE_METASTORE_URIS = "hive.metastore.uris";
 
   private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
@@ -103,12 +105,12 @@ public class HiveCatalog extends BaseMetastoreViewCatalog
     }
 
     if (properties.containsKey(CatalogProperties.URI)) {
-      this.conf.set("hive.metastore.uris", properties.get(CatalogProperties.URI));
+      this.conf.set(HIVE_METASTORE_URIS, properties.get(CatalogProperties.URI));
     }
 
     if (properties.containsKey(CatalogProperties.WAREHOUSE_LOCATION)) {
       this.conf.set(
-          "hive.metastore.warehouse.dir",
+          HIVE_METASTORE_WAREHOUSE_DIR,
           LocationUtil.stripTrailingSlash(properties.get(CatalogProperties.WAREHOUSE_LOCATION)));
     }
 
@@ -727,7 +729,7 @@ public class HiveCatalog extends BaseMetastoreViewCatalog
   }
 
   private String databaseLocation(String databaseName) {
-    String warehouseLocation = conf.get("hive.metastore.warehouse.dir");
+    String warehouseLocation = conf.get(HIVE_METASTORE_WAREHOUSE_DIR);
     Preconditions.checkNotNull(
         warehouseLocation, "Warehouse location is not set: hive.metastore.warehouse.dir=null");
     warehouseLocation = LocationUtil.stripTrailingSlash(warehouseLocation);
@@ -795,7 +797,7 @@ public class HiveCatalog extends BaseMetastoreViewCatalog
   public String toString() {
     return MoreObjects.toStringHelper(this)
         .add("name", name)
-        .add("uri", this.conf == null ? "" : this.conf.get("hive.metastore.uris"))
+        .add("uri", this.conf == null ? "" : this.conf.get(HIVE_METASTORE_URIS))
         .toString();
   }
 
