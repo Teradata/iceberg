@@ -234,7 +234,10 @@ abstract class BaseParquetReaders<T> {
         if (fieldReader != null) {
           Type fieldType = fields.get(i);
           int fieldD = type.getMaxDefinitionLevel(path(fieldType.getName())) - 1;
-          int id = fieldType.getId().intValue();
+          int id =
+              fieldType.getId() != null
+                  ? fieldType.getId().intValue()
+                  : expected.fields().get(i).fieldId();
           readersById.put(id, ParquetValueReaders.option(fieldType, fieldD, fieldReader));
         }
       }
