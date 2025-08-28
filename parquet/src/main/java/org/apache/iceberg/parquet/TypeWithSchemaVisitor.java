@@ -198,12 +198,13 @@ public class TypeWithSchemaVisitor<T> {
   private static <T> List<T> visitFields(
       Types.StructType struct, GroupType group, TypeWithSchemaVisitor<T> visitor) {
     List<T> results = Lists.newArrayListWithExpectedSize(group.getFieldCount());
-    int i =0;
+    int fieldIdFromStruct = 0;
     for (Type field : group.getFields()) {
-      int id = field.getId() != null
+      int id =
+          field.getId() != null
               ? field.getId().intValue()
-              : (struct != null) ? struct.fields().get(i).fieldId() : -1;
-      i++;
+              : (struct != null) ? struct.fields().get(fieldIdFromStruct).fieldId() : -1;
+      fieldIdFromStruct++;
       Types.NestedField iField = (struct != null && id >= 0) ? struct.field(id) : null;
       results.add(visitField(iField, field, visitor));
     }
