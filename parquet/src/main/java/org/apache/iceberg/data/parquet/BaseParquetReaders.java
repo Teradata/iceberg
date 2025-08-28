@@ -237,7 +237,7 @@ abstract class BaseParquetReaders<T> {
           int id =
               fieldType.getId() != null
                   ? fieldType.getId().intValue()
-                  : expected.fields().get(i).fieldId();
+                  : i < expected.fields().size() ? expected.fields().get(i).fieldId() : -1;
           readersById.put(id, ParquetValueReaders.option(fieldType, fieldD, fieldReader));
         }
       }
