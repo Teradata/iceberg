@@ -201,9 +201,11 @@ public class TypeWithSchemaVisitor<T> {
     int fieldIdFromStruct = 0;
     for (Type field : group.getFields()) {
       int id =
-          field.getId() != null
-              ? field.getId().intValue()
-              : (struct != null) ? struct.fields().get(fieldIdFromStruct).fieldId() : -1;
+              field.getId() != null
+                      ? field.getId().intValue()
+                      : (struct != null && fieldIdFromStruct < struct.fields().size())
+                      ? struct.fields().get(fieldIdFromStruct).fieldId()
+                      : -1;
       fieldIdFromStruct++;
       Types.NestedField iField = (struct != null && id >= 0) ? struct.field(id) : null;
       results.add(visitField(iField, field, visitor));
