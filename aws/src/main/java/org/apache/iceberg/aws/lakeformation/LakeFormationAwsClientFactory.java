@@ -141,9 +141,13 @@ public class LakeFormationAwsClientFactory extends AssumeRoleAwsClientFactory {
 
   protected LakeFormationClient lakeFormation() {
     return LakeFormationClient.builder()
-        .applyMutation(this::applyAssumeRoleConfigurations)
-        .applyMutation(httpClientProperties()::applyHttpClientConfigurations)
-        .build();
+            .applyMutation(this::applyAssumeRoleConfigurations)
+            .applyMutation(httpClientProperties()::applyHttpClientConfigurations)
+            .build();
+  }
+
+  protected AwsCredentialsProvider lakeFormationCredentialsProvider() {
+    return new LakeFormationCredentialsProvider(lakeFormation(), buildTableArn());
   }
 
   protected AwsCredentialsProvider lakeFormationCredentialsProvider() {
