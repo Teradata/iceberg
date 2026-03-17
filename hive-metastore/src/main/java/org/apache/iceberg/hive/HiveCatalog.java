@@ -24,7 +24,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
@@ -82,6 +81,8 @@ public class HiveCatalog extends BaseMetastoreViewCatalog
 
   // MetastoreConf is not available with current Hive version
   static final String HIVE_CONF_CATALOG = "metastore.catalog.default";
+  static final String HIVE_METASTORE_WAREHOUSE_DIR = "hive.metastore.warehouse.dir";
+  static final String HIVE_METASTORE_URIS = "hive.metastore.uris";
 
   private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
@@ -104,12 +105,12 @@ public class HiveCatalog extends BaseMetastoreViewCatalog
     }
 
     if (properties.containsKey(CatalogProperties.URI)) {
-      this.conf.set(HiveConf.ConfVars.METASTOREURIS.varname, properties.get(CatalogProperties.URI));
+      this.conf.set(HIVE_METASTORE_URIS, properties.get(CatalogProperties.URI));
     }
 
     if (properties.containsKey(CatalogProperties.WAREHOUSE_LOCATION)) {
       this.conf.set(
-          HiveConf.ConfVars.METASTOREWAREHOUSE.varname,
+          HIVE_METASTORE_WAREHOUSE_DIR,
           LocationUtil.stripTrailingSlash(properties.get(CatalogProperties.WAREHOUSE_LOCATION)));
     }
 
@@ -728,7 +729,7 @@ public class HiveCatalog extends BaseMetastoreViewCatalog
   }
 
   private String databaseLocation(String databaseName) {
-    String warehouseLocation = conf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
+    String warehouseLocation = conf.get(HIVE_METASTORE_WAREHOUSE_DIR);
     Preconditions.checkNotNull(
         warehouseLocation, "Warehouse location is not set: hive.metastore.warehouse.dir=null");
     warehouseLocation = LocationUtil.stripTrailingSlash(warehouseLocation);
@@ -796,7 +797,7 @@ public class HiveCatalog extends BaseMetastoreViewCatalog
   public String toString() {
     return MoreObjects.toStringHelper(this)
         .add("name", name)
-        .add("uri", this.conf == null ? "" : this.conf.get(HiveConf.ConfVars.METASTOREURIS.varname))
+        .add("uri", this.conf == null ? "" : this.conf.get(HIVE_METASTORE_URIS))
         .toString();
   }
 
