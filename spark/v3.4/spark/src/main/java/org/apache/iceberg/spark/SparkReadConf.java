@@ -22,6 +22,7 @@ import static org.apache.iceberg.PlanningMode.LOCAL;
 
 import java.util.Map;
 import org.apache.iceberg.PlanningMode;
+import org.apache.iceberg.SupportsDistributedScanPlanning;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.exceptions.ValidationException;
@@ -296,7 +297,9 @@ public class SparkReadConf {
   }
 
   public boolean distributedPlanningEnabled() {
-    return dataPlanningMode() != LOCAL || deletePlanningMode() != LOCAL;
+    return table instanceof SupportsDistributedScanPlanning distributed
+        && distributed.allowDistributedPlanning()
+        && (dataPlanningMode() != LOCAL || deletePlanningMode() != LOCAL);
   }
 
   public PlanningMode dataPlanningMode() {
@@ -341,6 +344,18 @@ public class SparkReadConf {
         .booleanConf()
         .sessionConf(SparkSQLProperties.EXECUTOR_CACHE_ENABLED)
         .defaultValue(SparkSQLProperties.EXECUTOR_CACHE_ENABLED_DEFAULT)
+        .parse();
+  }
+
+  public boolean cacheDeleteFilesOnExecutors() {
+    return executorCacheEnabled() && cacheDeleteFilesOnExecutorsInternal();
+  }
+
+  private boolean cacheDeleteFilesOnExecutorsInternal() {
+    return confParser
+        .booleanConf()
+        .sessionConf(SparkSQLProperties.EXECUTOR_CACHE_DELETE_FILES_ENABLED)
+        .defaultValue(SparkSQLProperties.EXECUTOR_CACHE_DELETE_FILES_ENABLED_DEFAULT)
         .parse();
   }
 

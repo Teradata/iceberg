@@ -20,11 +20,11 @@ package org.apache.iceberg.jdbc;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.SQLIntegrityConstraintViolationException;
 import java.sql.SQLNonTransientConnectionException;
 import java.sql.SQLTimeoutException;
 import java.sql.SQLTransientConnectionException;
@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.iceberg.CatalogProperties;
@@ -156,48 +157,61 @@ public class JdbcCatalog extends BaseMetastoreViewCatalog
     closeableGroup.setSuppressCloseFailure(true);
   }
 
+  private void atomicCreateTable(String tableName, String sqlCommand, String reason)
+      throws SQLException, InterruptedException {
+    connections.run(
+        conn -> {
+          DatabaseMetaData dbMeta = conn.getMetaData();
+
+          // check the existence of a table name
+          Predicate<String> tableTest =
+              name -> {
+                try (ResultSet result =
+                    dbMeta.getTables(
+                        null /* catalog name */,
+                        null /* schemaPattern */,
+                        name /* tableNamePattern */,
+                        null /* types */)) {
+                  return result.next();
+                } catch (SQLException e) {
+                  return false;
+                }
+              };
+
+          // some databases force table name to upper case -- check that last.
+          Predicate<String> tableExists =
+              name -> tableTest.test(name) || tableTest.test(name.toUpperCase(Locale.ROOT));
+
+          if (tableExists.test(tableName)) {
+            return true;
+          }
+
+          LOG.debug("Creating table {} {}", tableName, reason);
+          try (PreparedStatement stmt = conn.prepareStatement(sqlCommand)) {
+            stmt.execute();
+            return true;
+          } catch (SQLException e) {
+            // see if table was created by another thread or process.
+            if (tableExists.test(tableName)) {
+              return true;
+            }
+            throw e;
+          }
+        });
+  }
+
   private void initializeCatalogTables() {
     LOG.trace("Creating database tables (if missing) to store iceberg catalog");
+
     try {
-      connections.run(
-          conn -> {
-            DatabaseMetaData dbMeta = conn.getMetaData();
-            ResultSet tableExists =
-                dbMeta.getTables(
-                    null /* catalog name */,
-                    null /* schemaPattern */,
-                    JdbcUtil.CATALOG_TABLE_VIEW_NAME /* tableNamePattern */,
-                    null /* types */);
-            if (tableExists.next()) {
-              return true;
-            }
-
-            LOG.debug(
-                "Creating table {} to store iceberg catalog tables",
-                JdbcUtil.CATALOG_TABLE_VIEW_NAME);
-            return conn.prepareStatement(JdbcUtil.V0_CREATE_CATALOG_SQL).execute();
-          });
-
-      connections.run(
-          conn -> {
-            DatabaseMetaData dbMeta = conn.getMetaData();
-            ResultSet tableExists =
-                dbMeta.getTables(
-                    null /* catalog name */,
-                    null /* schemaPattern */,
-                    JdbcUtil.NAMESPACE_PROPERTIES_TABLE_NAME /* tableNamePattern */,
-                    null /* types */);
-
-            if (tableExists.next()) {
-              return true;
-            }
-
-            LOG.debug(
-                "Creating table {} to store iceberg catalog namespace properties",
-                JdbcUtil.NAMESPACE_PROPERTIES_TABLE_NAME);
-            return conn.prepareStatement(JdbcUtil.CREATE_NAMESPACE_PROPERTIES_TABLE_SQL).execute();
-          });
-
+      atomicCreateTable(
+          JdbcUtil.CATALOG_TABLE_VIEW_NAME,
+          JdbcUtil.V0_CREATE_CATALOG_SQL,
+          "to store iceberg catalog tables");
+      atomicCreateTable(
+          JdbcUtil.NAMESPACE_PROPERTIES_TABLE_NAME,
+          JdbcUtil.CREATE_NAMESPACE_PROPERTIES_TABLE_SQL,
+          "to store iceberg catalog namespace properties");
     } catch (SQLTimeoutException e) {
       throw new UncheckedSQLException(e, "Cannot initialize JDBC catalog: Query timed out");
     } catch (SQLTransientConnectionException | SQLNonTransientConnectionException e) {
@@ -215,25 +229,27 @@ public class JdbcCatalog extends BaseMetastoreViewCatalog
       connections.run(
           conn -> {
             DatabaseMetaData dbMeta = conn.getMetaData();
-            ResultSet typeColumn =
+            try (ResultSet typeColumn =
                 dbMeta.getColumns(
-                    null, null, JdbcUtil.CATALOG_TABLE_VIEW_NAME, JdbcUtil.RECORD_TYPE);
-            if (typeColumn.next()) {
-              LOG.debug("{} already supports views", JdbcUtil.CATALOG_TABLE_VIEW_NAME);
-              schemaVersion = JdbcUtil.SchemaVersion.V1;
-              return true;
-            } else {
-              if (PropertyUtil.propertyAsString(
-                      catalogProperties,
-                      JdbcUtil.SCHEMA_VERSION_PROPERTY,
-                      JdbcUtil.SchemaVersion.V0.name())
-                  .equalsIgnoreCase(JdbcUtil.SchemaVersion.V1.name())) {
-                LOG.debug("{} is being updated to support views", JdbcUtil.CATALOG_TABLE_VIEW_NAME);
+                    null, null, JdbcUtil.CATALOG_TABLE_VIEW_NAME, JdbcUtil.RECORD_TYPE)) {
+              if (typeColumn.next()) {
+                LOG.debug("{} already supports views", JdbcUtil.CATALOG_TABLE_VIEW_NAME);
                 schemaVersion = JdbcUtil.SchemaVersion.V1;
-                return conn.prepareStatement(JdbcUtil.V1_UPDATE_CATALOG_SQL).execute();
-              } else {
-                LOG.warn(VIEW_WARNING_LOG_MESSAGE);
                 return true;
+              } else {
+                if (PropertyUtil.propertyAsString(
+                        catalogProperties,
+                        JdbcUtil.SCHEMA_VERSION_PROPERTY,
+                        JdbcUtil.SchemaVersion.V0.name())
+                    .equalsIgnoreCase(JdbcUtil.SchemaVersion.V1.name())) {
+                  LOG.debug(
+                      "{} is being updated to support views", JdbcUtil.CATALOG_TABLE_VIEW_NAME);
+                  schemaVersion = JdbcUtil.SchemaVersion.V1;
+                  return executeV1CatalogUpdate(conn);
+                } else {
+                  LOG.warn(VIEW_WARNING_LOG_MESSAGE);
+                  return true;
+                }
               }
             }
           });
@@ -246,6 +262,12 @@ public class JdbcCatalog extends BaseMetastoreViewCatalog
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new UncheckedInterruptedException(e, "Interrupted in call to initialize");
+    }
+  }
+
+  private static boolean executeV1CatalogUpdate(Connection conn) throws SQLException {
+    try (PreparedStatement stmt = conn.prepareStatement(JdbcUtil.V1_UPDATE_CATALOG_SQL)) {
+      return stmt.execute();
     }
   }
 
@@ -322,7 +344,6 @@ public class JdbcCatalog extends BaseMetastoreViewCatalog
         JdbcUtil.namespaceToString(namespace));
   }
 
-  @SuppressWarnings("checkstyle:CyclomaticComplexity")
   @Override
   public void renameTable(TableIdentifier from, TableIdentifier to) {
     if (from.equals(to)) {
@@ -348,9 +369,7 @@ public class JdbcCatalog extends BaseMetastoreViewCatalog
     int updatedRecords =
         execute(
             err -> {
-              // SQLite doesn't set SQLState or throw SQLIntegrityConstraintViolationException
-              if (err instanceof SQLIntegrityConstraintViolationException
-                  || (err.getMessage() != null && err.getMessage().contains("constraint failed"))) {
+              if (JdbcUtil.isConstraintViolation(err)) {
                 throw new AlreadyExistsException("Table already exists: %s", to);
               }
             },
@@ -520,7 +539,15 @@ public class JdbcCatalog extends BaseMetastoreViewCatalog
     List<TableIdentifier> tableIdentifiers = listTables(namespace);
     if (tableIdentifiers != null && !tableIdentifiers.isEmpty()) {
       throw new NamespaceNotEmptyException(
-          "Namespace %s is not empty. %s tables exist.", namespace, tableIdentifiers.size());
+          "Namespace %s is not empty. Contains %d table(s).", namespace, tableIdentifiers.size());
+    }
+
+    if (schemaVersion != JdbcUtil.SchemaVersion.V0) {
+      List<TableIdentifier> viewIdentifiers = listViews(namespace);
+      if (viewIdentifiers != null && !viewIdentifiers.isEmpty()) {
+        throw new NamespaceNotEmptyException(
+            "Namespace %s is not empty. Contains %d view(s).", namespace, viewIdentifiers.size());
+      }
     }
 
     int deletedRows =
@@ -690,9 +717,7 @@ public class JdbcCatalog extends BaseMetastoreViewCatalog
     int updatedRecords =
         execute(
             err -> {
-              // SQLite doesn't set SQLState or throw SQLIntegrityConstraintViolationException
-              if (err instanceof SQLIntegrityConstraintViolationException
-                  || (err.getMessage() != null && err.getMessage().contains("constraint failed"))) {
+              if (JdbcUtil.isConstraintViolation(err)) {
                 throw new AlreadyExistsException(
                     "Cannot rename %s to %s. View already exists", from, to);
               }

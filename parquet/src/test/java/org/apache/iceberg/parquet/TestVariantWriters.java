@@ -41,11 +41,19 @@ import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.relocated.com.google.common.collect.Iterables;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.types.Types;
+import org.apache.iceberg.variants.ShreddedObject;
+import org.apache.iceberg.variants.ValueArray;
 import org.apache.iceberg.variants.Variant;
+import org.apache.iceberg.variants.VariantArray;
 import org.apache.iceberg.variants.VariantMetadata;
 import org.apache.iceberg.variants.VariantObject;
 import org.apache.iceberg.variants.VariantTestUtil;
+import org.apache.iceberg.variants.VariantValue;
 import org.apache.iceberg.variants.Variants;
+import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.MessageType;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.FieldSource;
 
@@ -73,6 +81,12 @@ public class TestVariantWriters {
               "c", Variants.of("string")));
   private static final ByteBuffer EMPTY_OBJECT_BUFFER =
       VariantTestUtil.createObject(TEST_METADATA_BUFFER, ImmutableMap.of());
+  private static final ByteBuffer ARRAY_IN_OBJECT_BUFFER =
+      VariantTestUtil.createObject(
+          TEST_METADATA_BUFFER,
+          ImmutableMap.of(
+              "a", Variants.of(123456789),
+              "c", array(Variants.of("string"), Variants.of("iceberg"))));
 
   private static final VariantMetadata EMPTY_METADATA =
       Variants.metadata(VariantTestUtil.emptyMetadata());
@@ -83,6 +97,45 @@ public class TestVariantWriters {
       (VariantObject) Variants.value(TEST_METADATA, SIMILAR_OBJECT_BUFFER);
   private static final VariantObject EMPTY_OBJECT =
       (VariantObject) Variants.value(TEST_METADATA, EMPTY_OBJECT_BUFFER);
+  private static final VariantObject ARRAY_IN_OBJECT =
+      (VariantObject) Variants.value(TEST_METADATA, ARRAY_IN_OBJECT_BUFFER);
+
+  private static final ByteBuffer EMPTY_ARRAY_BUFFER = VariantTestUtil.createArray();
+  private static final ByteBuffer TEST_ARRAY_BUFFER =
+      VariantTestUtil.createArray(Variants.of("iceberg"), Variants.of("string"));
+  private static final ByteBuffer MIXED_TYPE_ARRAY_BUFFER =
+      VariantTestUtil.createArray(Variants.of("iceberg"), Variants.of("string"), Variants.of(34));
+  private static final ByteBuffer NESTED_ARRAY_BUFFER =
+      VariantTestUtil.createArray(
+          array(Variants.of("string"), Variants.of("iceberg")),
+          array(Variants.of("apple"), Variants.of("banana")));
+  private static final ByteBuffer MIXED_NESTED_ARRAY_BUFFER =
+      VariantTestUtil.createArray(
+          array(Variants.of("string"), Variants.of("iceberg"), Variants.of(34)),
+          array(Variants.of(34), Variants.ofNull()),
+          array(),
+          array(Variants.of("string"), Variants.of("iceberg")),
+          Variants.of(34));
+  private static final ByteBuffer OBJECT_IN_ARRAY_BUFFER =
+      VariantTestUtil.createArray(SIMILAR_OBJECT, SIMILAR_OBJECT);
+  private static final ByteBuffer MIXED_OBJECT_IN_ARRAY_BUFFER =
+      VariantTestUtil.createArray(
+          SIMILAR_OBJECT, SIMILAR_OBJECT, Variants.of("iceberg"), Variants.of(34));
+
+  private static final VariantArray EMPTY_ARRAY =
+      (VariantArray) Variants.value(EMPTY_METADATA, EMPTY_ARRAY_BUFFER);
+  private static final VariantArray TEST_ARRAY =
+      (VariantArray) Variants.value(EMPTY_METADATA, TEST_ARRAY_BUFFER);
+  private static final VariantArray MIXED_TYPE_ARRAY =
+      (VariantArray) Variants.value(EMPTY_METADATA, MIXED_TYPE_ARRAY_BUFFER);
+  private static final VariantArray NESTED_ARRAY =
+      (VariantArray) Variants.value(EMPTY_METADATA, NESTED_ARRAY_BUFFER);
+  private static final VariantArray MIXED_NESTED_ARRAY =
+      (VariantArray) Variants.value(EMPTY_METADATA, MIXED_NESTED_ARRAY_BUFFER);
+  private static final VariantArray OBJECT_IN_ARRAY =
+      (VariantArray) Variants.value(TEST_METADATA, OBJECT_IN_ARRAY_BUFFER);
+  private static final VariantArray MIXED_OBJECT_IN_ARRAY =
+      (VariantArray) Variants.value(TEST_METADATA, MIXED_OBJECT_IN_ARRAY_BUFFER);
 
   private static final Variant[] VARIANTS =
       new Variant[] {
@@ -104,6 +157,14 @@ public class TestVariantWriters {
         Variant.of(EMPTY_METADATA, EMPTY_OBJECT),
         Variant.of(TEST_METADATA, TEST_OBJECT),
         Variant.of(TEST_METADATA, SIMILAR_OBJECT),
+        Variant.of(TEST_METADATA, ARRAY_IN_OBJECT),
+        Variant.of(EMPTY_METADATA, EMPTY_ARRAY),
+        Variant.of(EMPTY_METADATA, TEST_ARRAY),
+        Variant.of(EMPTY_METADATA, MIXED_TYPE_ARRAY),
+        Variant.of(EMPTY_METADATA, NESTED_ARRAY),
+        Variant.of(EMPTY_METADATA, MIXED_NESTED_ARRAY),
+        Variant.of(TEST_METADATA, OBJECT_IN_ARRAY),
+        Variant.of(TEST_METADATA, MIXED_OBJECT_IN_ARRAY),
         Variant.of(EMPTY_METADATA, Variants.ofIsoDate("2024-11-07")),
         Variant.of(EMPTY_METADATA, Variants.ofIsoDate("1957-11-07")),
         Variant.of(EMPTY_METADATA, Variants.ofIsoTimestamptz("2024-11-07T12:33:54.123456+00:00")),
@@ -121,6 +182,16 @@ public class TestVariantWriters {
         Variant.of(
             EMPTY_METADATA, Variants.of(ByteBuffer.wrap(new byte[] {0x0a, 0x0b, 0x0c, 0x0d}))),
         Variant.of(EMPTY_METADATA, Variants.of("iceberg")),
+        Variant.of(EMPTY_METADATA, Variants.ofIsoTime("12:33:54.123456")),
+        Variant.of(
+            EMPTY_METADATA, Variants.ofIsoTimestamptzNanos("2024-11-07T12:33:54.123456789+00:00")),
+        Variant.of(
+            EMPTY_METADATA, Variants.ofIsoTimestamptzNanos("1957-11-07T12:33:54.123456789+00:00")),
+        Variant.of(
+            EMPTY_METADATA, Variants.ofIsoTimestampntzNanos("2024-11-07T12:33:54.123456789")),
+        Variant.of(
+            EMPTY_METADATA, Variants.ofIsoTimestampntzNanos("1957-11-07T12:33:54.123456789")),
+        Variant.of(EMPTY_METADATA, Variants.ofUUID("f24f9b64-81fa-49d1-b74e-8c09a6e31c56")),
       };
 
   @ParameterizedTest
@@ -155,7 +226,7 @@ public class TestVariantWriters {
     List<Record> actual =
         writeAndRead((id, name) -> ParquetVariantUtil.toParquetSchema(variant.value()), expected);
 
-    assertThat(actual.size()).isEqualTo(expected.size());
+    assertThat(actual).hasSameSizeAs(expected);
 
     for (int i = 0; i < expected.size(); i += 1) {
       InternalTestHelpers.assertEquals(SCHEMA.asStruct(), expected.get(i), actual.get(i));
@@ -182,12 +253,82 @@ public class TestVariantWriters {
       }
     }
 
+    try (ParquetFileReader reader =
+        ParquetFileReader.open(ParquetIO.file(outputFile.toInputFile()))) {
+      MessageType schema = reader.getFileMetaData().getSchema();
+      for (Types.NestedField column : SCHEMA.columns()) {
+        if (column.type() == Types.VariantType.get()) {
+          int fieldIndex = schema.getFieldIndex(column.name());
+          assertThat(schema.getFields().get(fieldIndex).getLogicalTypeAnnotation())
+              .isEqualTo(LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION));
+        }
+      }
+    }
+
     try (CloseableIterable<Record> reader =
         Parquet.read(outputFile.toInputFile())
             .project(SCHEMA)
             .createReaderFunc(fileSchema -> InternalReader.create(SCHEMA, fileSchema))
             .build()) {
       return Lists.newArrayList(reader);
+    }
+  }
+
+  private static ValueArray array(VariantValue... values) {
+    ValueArray arr = Variants.array();
+    for (VariantValue value : values) {
+      arr.add(value);
+    }
+
+    return arr;
+  }
+
+  @Test
+  public void testPartialShreddingWithShreddedObject() throws IOException {
+    // Test for issue #15086: partial shredding with ShreddedObject created using put()
+    // Create a ShreddedObject with multiple fields, then partially shred it
+    VariantMetadata metadata = Variants.metadata("id", "name", "city");
+
+    // Create objects using ShreddedObject.put() instead of serialized buffers
+    List<Record> records = Lists.newArrayList();
+    for (int i = 0; i < 3; i++) {
+      ShreddedObject obj = Variants.object(metadata);
+      obj.put("id", Variants.of(1000L + i));
+      obj.put("name", Variants.of("user_" + i));
+      obj.put("city", Variants.of("city_" + i));
+
+      Variant variant = Variant.of(metadata, obj);
+      Record record = RECORD.copy("id", i, "var", variant);
+      records.add(record);
+    }
+
+    // Shredding function that only shreds the "id" field
+    VariantShreddingFunction partialShredding =
+        (id, name) -> {
+          VariantMetadata shreddedMetadata = Variants.metadata("id");
+          ShreddedObject shreddedObject = Variants.object(shreddedMetadata);
+          shreddedObject.put("id", Variants.of(1234L));
+          return ParquetVariantUtil.toParquetSchema(shreddedObject);
+        };
+
+    // Write and read back
+    List<Record> actual = writeAndRead(partialShredding, records);
+
+    // Verify all records match
+    assertThat(actual).hasSameSizeAs(records);
+    for (int i = 0; i < records.size(); i++) {
+      Record expected = records.get(i);
+      Record read = actual.get(i);
+
+      InternalTestHelpers.assertEquals(SCHEMA.asStruct(), expected, read);
+
+      // Also verify the variant object has all fields intact
+      Variant readVariant = (Variant) read.getField("var");
+      VariantObject readObj = readVariant.value().asObject();
+      assertThat(readObj.numFields()).isEqualTo(3);
+      assertThat(readObj.get("id").asPrimitive().get()).isEqualTo(1000L + i);
+      assertThat(readObj.get("name").asPrimitive().get()).isEqualTo("user_" + i);
+      assertThat(readObj.get("city").asPrimitive().get()).isEqualTo("city_" + i);
     }
   }
 }

@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
@@ -120,7 +121,11 @@ public class TestSparkDataFile {
 
   @BeforeAll
   public static void startSpark() {
-    TestSparkDataFile.spark = SparkSession.builder().master("local[2]").getOrCreate();
+    TestSparkDataFile.spark =
+        SparkSession.builder()
+            .master("local[2]")
+            .config("spark.driver.host", InetAddress.getLoopbackAddress().getHostAddress())
+            .getOrCreate();
     TestSparkDataFile.sparkContext = JavaSparkContext.fromSparkContext(spark.sparkContext());
   }
 
@@ -136,7 +141,7 @@ public class TestSparkDataFile {
   private String tableLocation = null;
 
   @BeforeEach
-  public void setupTableLocation() throws Exception {
+  public void setupTableLocation() {
     this.tableLocation = tableDir.toURI().toString();
   }
 
@@ -178,7 +183,8 @@ public class TestSparkDataFile {
     assertThat(manifests).hasSize(1);
 
     List<DataFile> dataFiles = Lists.newArrayList();
-    try (ManifestReader<DataFile> reader = ManifestFiles.read(manifests.get(0), table.io())) {
+    try (ManifestReader<DataFile> reader =
+        ManifestFiles.read(manifests.get(0), table.io(), table.specs())) {
       for (DataFile dataFile : reader) {
         checkDataFile(dataFile.copy(), DataFiles.builder(dataFilesSpec).copy(dataFile).build());
         dataFiles.add(dataFile.copy());

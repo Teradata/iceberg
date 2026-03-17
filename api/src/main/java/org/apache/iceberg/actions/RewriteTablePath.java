@@ -18,6 +18,8 @@
  */
 package org.apache.iceberg.actions;
 
+import java.util.concurrent.ExecutorService;
+
 /**
  * An action that rewrites the table's metadata files to a staging directory, replacing all source
  * prefixes in absolute paths with a specified target prefix. There are two modes:
@@ -86,6 +88,31 @@ public interface RewriteTablePath extends Action<RewriteTablePath, RewriteTableP
    */
   RewriteTablePath stagingLocation(String stagingLocation);
 
+  /**
+   * Whether to create the file list.
+   *
+   * <p>The default value is true, which means the file list will be created. If set to false, the
+   * file list will not be created.
+   *
+   * @param createFileList true to create the file list, false to skip it
+   * @return this instance for method chaining
+   */
+  default RewriteTablePath createFileList(boolean createFileList) {
+    return this;
+  }
+
+  /**
+   * Passes an alternative executor service that will be used for version file and manifest list
+   * rewriting. If this method is not called, these operations will be performed sequentially.
+   *
+   * @param executorService an executor service to parallelize metadata rewriting
+   * @return this for method chaining
+   */
+  default RewriteTablePath executeWith(ExecutorService executorService) {
+    throw new UnsupportedOperationException(
+        "This implementation does not support providing an ExecutorService.");
+  }
+
   /** The action result that contains a summary of the execution. */
   interface Result {
     /** Staging location of rewritten files */
@@ -112,5 +139,15 @@ public interface RewriteTablePath extends Action<RewriteTablePath, RewriteTableP
 
     /** Name of latest metadata file version */
     String latestVersion();
+
+    /** Number of delete files with rewritten paths. */
+    default int rewrittenDeleteFilePathsCount() {
+      return 0;
+    }
+
+    /** Number of manifest files with rewritten paths. */
+    default int rewrittenManifestFilePathsCount() {
+      return 0;
+    }
   }
 }

@@ -20,6 +20,7 @@ package org.apache.iceberg.aws;
 
 import java.io.Serializable;
 import java.util.Map;
+import java.util.function.Predicate;
 import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.aws.s3.VendedCredentialsProvider;
 import org.apache.iceberg.common.DynClasses;
@@ -28,7 +29,6 @@ import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.base.Strings;
 import org.apache.iceberg.rest.RESTUtil;
 import org.apache.iceberg.util.PropertyUtil;
-import org.apache.iceberg.util.SerializableMap;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
@@ -38,6 +38,7 @@ import software.amazon.awssdk.awscore.client.builder.AwsClientBuilder;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.retry.RetryMode;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.LegacyMd5Plugin;
 import software.amazon.awssdk.services.s3.S3CrtAsyncClientBuilder;
 
 public class AwsClientProperties implements Serializable {
@@ -82,12 +83,20 @@ public class AwsClientProperties implements Serializable {
   /** Controls whether vended credentials should be refreshed or not. Defaults to true. */
   public static final String REFRESH_CREDENTIALS_ENABLED = "client.refresh-credentials-enabled";
 
+  /**
+   * Controls whether legacy MD5 plugin should be added or not. Defaults to false. AWS SDK version
+   * 2.30.0 introduced integrity protections that are not backward compatible. Enable this property
+   * only when you need to access older S3-compatible object storages that depend on the legacy MD5
+   * checksum.
+   */
+  public static final String LEGACY_MD5_PLUGIN_ENABLED = "client.legacy-md5-plugin-enabled";
+
   private String clientRegion;
   private final String clientCredentialsProvider;
   private final Map<String, String> clientCredentialsProviderProperties;
   private final String refreshCredentialsEndpoint;
   private final boolean refreshCredentialsEnabled;
-  private final Map<String, String> allProperties;
+  private final boolean legacyMd5pluginEnabled;
 
   public AwsClientProperties() {
     this.clientRegion = null;
@@ -95,20 +104,26 @@ public class AwsClientProperties implements Serializable {
     this.clientCredentialsProviderProperties = null;
     this.refreshCredentialsEndpoint = null;
     this.refreshCredentialsEnabled = true;
-    this.allProperties = null;
+    this.legacyMd5pluginEnabled = false;
   }
 
   public AwsClientProperties(Map<String, String> properties) {
-    this.allProperties = SerializableMap.copyOf(properties);
     this.clientRegion = properties.get(CLIENT_REGION);
     this.clientCredentialsProvider = properties.get(CLIENT_CREDENTIALS_PROVIDER);
+    // Retain all non-prefixed properties and override with prefixed properties
     this.clientCredentialsProviderProperties =
-        PropertyUtil.propertiesWithPrefix(properties, CLIENT_CREDENTIAL_PROVIDER_PREFIX);
+        PropertyUtil.mergeProperties(
+            PropertyUtil.filterProperties(
+                properties,
+                Predicate.not(property -> property.startsWith(CLIENT_CREDENTIAL_PROVIDER_PREFIX))),
+            PropertyUtil.propertiesWithPrefix(properties, CLIENT_CREDENTIAL_PROVIDER_PREFIX));
     this.refreshCredentialsEndpoint =
         RESTUtil.resolveEndpoint(
             properties.get(CatalogProperties.URI), properties.get(REFRESH_CREDENTIALS_ENDPOINT));
     this.refreshCredentialsEnabled =
         PropertyUtil.propertyAsBoolean(properties, REFRESH_CREDENTIALS_ENABLED, true);
+    this.legacyMd5pluginEnabled =
+        PropertyUtil.propertyAsBoolean(properties, LEGACY_MD5_PLUGIN_ENABLED, false);
   }
 
   public String clientRegion() {
@@ -128,7 +143,8 @@ public class AwsClientProperties implements Serializable {
    *     S3Client.builder().applyMutation(awsClientProperties::applyClientRegionConfiguration)
    * </pre>
    */
-  public <T extends AwsClientBuilder> void applyClientRegionConfiguration(T builder) {
+  public <BuilderT extends AwsClientBuilder<BuilderT, ClientT>, ClientT>
+      void applyClientRegionConfiguration(BuilderT builder) {
     if (clientRegion != null) {
       builder.region(Region.of(clientRegion));
     }
@@ -158,7 +174,8 @@ public class AwsClientProperties implements Serializable {
    *     DynamoDbClient.builder().applyMutation(awsClientProperties::applyClientCredentialConfigurations)
    * </pre>
    */
-  public <T extends AwsClientBuilder> void applyClientCredentialConfigurations(T builder) {
+  public <BuilderT extends AwsClientBuilder<BuilderT, ClientT>, ClientT>
+      void applyClientCredentialConfigurations(BuilderT builder) {
     if (!Strings.isNullOrEmpty(this.clientCredentialsProvider)) {
       builder.credentialsProvider(credentialsProvider(this.clientCredentialsProvider));
     }
@@ -195,8 +212,13 @@ public class AwsClientProperties implements Serializable {
   @SuppressWarnings("checkstyle:HiddenField")
   public AwsCredentialsProvider credentialsProvider(
       String accessKeyId, String secretAccessKey, String sessionToken) {
+    if (!Strings.isNullOrEmpty(this.clientCredentialsProvider)) {
+      clientCredentialsProviderProperties.put(
+          VendedCredentialsProvider.URI, refreshCredentialsEndpoint);
+      return credentialsProvider(this.clientCredentialsProvider);
+    }
+
     if (refreshCredentialsEnabled && !Strings.isNullOrEmpty(refreshCredentialsEndpoint)) {
-      clientCredentialsProviderProperties.putAll(allProperties);
       clientCredentialsProviderProperties.put(
           VendedCredentialsProvider.URI, refreshCredentialsEndpoint);
       return credentialsProvider(VendedCredentialsProvider.class.getName());
@@ -210,10 +232,6 @@ public class AwsClientProperties implements Serializable {
         return StaticCredentialsProvider.create(
             AwsSessionCredentials.create(accessKeyId, secretAccessKey, sessionToken));
       }
-    }
-
-    if (!Strings.isNullOrEmpty(this.clientCredentialsProvider)) {
-      return credentialsProvider(this.clientCredentialsProvider);
     }
 
     // Create a new credential provider for each client
@@ -231,13 +249,30 @@ public class AwsClientProperties implements Serializable {
    *   KmsClient.builder().applyMutation(awsClientProperties::applyRetryConfigurations)
    * </pre>
    */
-  public <T extends AwsClientBuilder> void applyRetryConfigurations(T builder) {
+  public <BuilderT extends AwsClientBuilder<BuilderT, ClientT>, ClientT>
+      void applyRetryConfigurations(BuilderT builder) {
     ClientOverrideConfiguration.Builder configBuilder =
         null != builder.overrideConfiguration()
             ? builder.overrideConfiguration().toBuilder()
             : ClientOverrideConfiguration.builder();
 
     builder.overrideConfiguration(configBuilder.retryStrategy(RetryMode.ADAPTIVE_V2).build());
+  }
+
+  /**
+   * Add a legacy md5 plugin if it is enabled.
+   *
+   * <p>Sample usage:
+   *
+   * <pre>
+   *     S3Client.builder().applyMutation(awsClientProperties::applyLegacyMd5Plugin)
+   * </pre>
+   */
+  public <BuilderT extends AwsClientBuilder<BuilderT, ClientT>, ClientT> void applyLegacyMd5Plugin(
+      BuilderT builder) {
+    if (legacyMd5pluginEnabled) {
+      builder.addPlugin(LegacyMd5Plugin.create());
+    }
   }
 
   private AwsCredentialsProvider credentialsProvider(String credentialsProviderClass) {

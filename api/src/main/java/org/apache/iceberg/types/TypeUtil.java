@@ -19,6 +19,7 @@
 package org.apache.iceberg.types;
 
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -100,6 +101,19 @@ public class TypeUtil {
     }
 
     return new Schema(ImmutableList.of(), schema.getAliases());
+  }
+
+  /**
+   * Selects fields from a schema by ID and returns them ordered by field ID.
+   *
+   * <p>Unlike {@link #select(Schema, Set)}, which preserves the field ordering of the input schema,
+   * this method always returns columns sorted by field ID.
+   */
+  public static Schema selectInIdOrder(Schema schema, Set<Integer> fieldIds) {
+    Schema selected = select(schema, fieldIds);
+    List<Types.NestedField> sorted = Lists.newArrayList(selected.columns());
+    sorted.sort(Comparator.comparingInt(Types.NestedField::fieldId));
+    return new Schema(sorted);
   }
 
   public static Types.StructType select(Types.StructType struct, Set<Integer> fieldIds) {
@@ -220,6 +234,30 @@ public class TypeUtil {
 
   public static Map<Integer, Integer> indexParents(Types.StructType struct) {
     return ImmutableMap.copyOf(visit(struct, new IndexParents()));
+  }
+
+  /**
+   * Searches in the given schema for all ancestor fields of the given field ID. If the field ID is
+   * defined in a nested type, then all of its ancestor fields are returned. If the field ID is not
+   * nested, an empty list is returned.
+   *
+   * @param schema The schema to search for the field ID
+   * @param fieldId The field ID to find the parents of
+   * @return A list of all ancestor fields of the given field ID if the field ID points to a nested
+   *     field. If the field ID is not a nested field, then an empty list is returned.
+   */
+  public static List<Types.NestedField> ancestorFields(Schema schema, int fieldId) {
+    Map<Integer, Integer> idToParent = TypeUtil.indexParents(schema.asStruct());
+    List<Types.NestedField> parents = Lists.newArrayList();
+    if (idToParent.containsKey(fieldId)) {
+      Integer parentId = idToParent.get(fieldId);
+      while (parentId != null) {
+        parents.add(schema.findField(parentId));
+        parentId = idToParent.get(parentId);
+      }
+    }
+
+    return parents;
   }
 
   /**
@@ -575,6 +613,52 @@ public class TypeUtil {
   /** Interface for passing a function that assigns column IDs from the previous Id. */
   public interface GetID {
     int get(int oldId);
+  }
+
+  /**
+   * Creates a function that reassigns specified field IDs.
+   *
+   * <p>This is useful for merging schemas where some field IDs in one schema might conflict with
+   * IDs already in use by another schema. The function will reassign the provided IDs to new unused
+   * IDs, while preserving other IDs.
+   *
+   * @param conflictingIds the set of conflicting field IDs that should be reassigned
+   * @param allUsedIds the set of field IDs that are already in use and cannot be reused
+   * @return a function that reassigns conflicting field IDs while preserving others
+   */
+  public static GetID reassignConflictingIds(Set<Integer> conflictingIds, Set<Integer> allUsedIds) {
+    return new ReassignConflictingIds(conflictingIds, allUsedIds);
+  }
+
+  private static class ReassignConflictingIds implements GetID {
+    private final Set<Integer> conflictingIds;
+    private final Set<Integer> allUsedIds;
+    private final AtomicInteger nextId;
+
+    private ReassignConflictingIds(Set<Integer> conflictingIds, Set<Integer> allUsedIds) {
+      this.conflictingIds = conflictingIds;
+      this.allUsedIds = allUsedIds;
+      this.nextId = new AtomicInteger();
+    }
+
+    @Override
+    public int get(int oldId) {
+      if (conflictingIds.contains(oldId)) {
+        return nextAvailableId();
+      } else {
+        return oldId;
+      }
+    }
+
+    private int nextAvailableId() {
+      int candidateId = nextId.incrementAndGet();
+
+      while (allUsedIds.contains(candidateId)) {
+        candidateId = nextId.incrementAndGet();
+      }
+
+      return candidateId;
+    }
   }
 
   public static class SchemaVisitor<T> {

@@ -26,17 +26,17 @@ buildscript {
     gradlePluginPortal()
   }
   dependencies {
-    classpath 'com.gradleup.shadow:shadow-gradle-plugin:8.3.6'
-    classpath 'com.palantir.baseline:gradle-baseline-java:5.72.0'
-    classpath 'com.diffplug.spotless:spotless-plugin-gradle:6.25.0'
+    classpath 'com.gradleup.shadow:shadow-gradle-plugin:8.3.10'
+    classpath 'com.palantir.baseline:gradle-baseline-java:6.90.0'
+    classpath 'com.diffplug.spotless:spotless-plugin-gradle:8.3.0'
     classpath 'gradle.plugin.org.inferred:gradle-processors:3.7.0'
     classpath 'me.champeau.jmh:jmh-gradle-plugin:0.7.3'
     classpath 'gradle.plugin.io.morethan.jmhreport:gradle-jmh-report:0.9.6'
     classpath "com.github.alisiikh:gradle-scalastyle-plugin:3.5.0"
     classpath 'org.revapi:gradle-revapi:1.8.0'
-    classpath 'com.gorylenko.gradle-git-properties:gradle-git-properties:2.5.0'
-    classpath 'com.palantir.gradle.gitversion:gradle-git-version:3.2.0'
-    classpath 'org.openapitools:openapi-generator-gradle-plugin:7.12.0'
+    classpath 'com.gorylenko.gradle-git-properties:gradle-git-properties:2.5.7'
+    classpath 'com.palantir.gradle.gitversion:gradle-git-version:4.3.0'
+    classpath 'org.openapitools:openapi-generator-gradle-plugin:7.20.0'
   }
 }
 
@@ -51,10 +51,7 @@ try {
   project.logger.error(e.getMessage())
 }
 
-if (JavaVersion.current() == JavaVersion.VERSION_11) {
-  project.ext.jdkVersion = '11'
-  project.ext.extraJvmArgs = []
-} else if (JavaVersion.current() == JavaVersion.VERSION_17 || JavaVersion.current() == JavaVersion.VERSION_21) {
+if (JavaVersion.current() == JavaVersion.VERSION_17 || JavaVersion.current() == JavaVersion.VERSION_21) {
   project.ext.jdkVersion = JavaVersion.current().getMajorVersion().toString()
   project.ext.extraJvmArgs = ["--add-opens", "java.base/java.io=ALL-UNNAMED",
                               "--add-opens", "java.base/java.lang.invoke=ALL-UNNAMED",
@@ -78,7 +75,7 @@ if (JavaVersion.current() == JavaVersion.VERSION_11) {
                               "--add-opens", "java.base/sun.security.action=ALL-UNNAMED",
                               "--add-opens", "java.base/sun.util.calendar=ALL-UNNAMED"]
 } else {
-  throw new GradleException("This build must be run with JDK 11 or 17 or 21 but was executed with JDK " + JavaVersion.current())
+  throw new GradleException("This build must be run with JDK 17 or 21 but was executed with JDK " + JavaVersion.current())
 }
 
 tasks.withType(AbstractArchiveTask).configureEach {
@@ -95,6 +92,7 @@ gitProperties {
   failOnNoGitDirectory = true
   keys = ['git.branch', 'git.build.version', 'git.closest.tag.name','git.commit.id.abbrev', 'git.commit.id',
           'git.commit.message.short', 'git.commit.time', 'git.tags']
+  version = projectVersion
 }
 generateGitProperties.outputs.upToDateWhen { false }
 
@@ -135,7 +133,7 @@ subprojects {
     revapi {
       oldGroup = project.group
       oldName = project.name
-      oldVersion = "1.8.0"
+      oldVersion = "1.10.0"
     }
 
     tasks.register('showDeprecationRulesOnRevApiFailure') {
@@ -163,6 +161,19 @@ subprojects {
     }
   }
 
+  def testParallelism = System.getProperty('testParallelism')
+  if (testParallelism != null) {
+    def numTestWorkers
+    if (testParallelism.equalsIgnoreCase('auto')) {
+      numTestWorkers = Math.ceil(Runtime.getRuntime().availableProcessors() / 2.0) as int
+    } else {
+      numTestWorkers = testParallelism as int
+    }
+    tasks.withType(Test).configureEach {
+      maxParallelForks = numTestWorkers
+    }
+  }
+
   configurations {
     testImplementation.extendsFrom compileOnly
 
@@ -181,6 +192,12 @@ subprojects {
       exclude group: 'com.sun.jersey'
       exclude group: 'com.sun.jersey.contribs'
       exclude group: 'org.pentaho', module: 'pentaho-aggdesigner-algorithm'
+      exclude group: 'org.jetbrains', module: 'annotations'
+      resolutionStrategy {
+        dependencySubstitution {
+          substitute module("org.lz4:lz4-java") using module(libs.lz4Java.get().toString()) because("Enforce lz4-java that contains CVE-2025-12183 and CVE-2025-66566 fixes")
+        }
+      }
     }
 
     testArtifacts
@@ -188,7 +205,7 @@ subprojects {
 
   tasks.withType(JavaCompile.class).configureEach {
     options.encoding = "UTF-8"
-    options.release = 11
+    options.release = 17
   }
 
   javadoc {
@@ -230,18 +247,26 @@ subprojects {
     jvmArgs += project.property('extraJvmArgs')
 
     testLogging {
-      events "failed"
+      // Check if running on CI environment
+      if (System.getenv('CI') != null) {
+        // More verbose logging for CI environments
+        events "started", "passed", "skipped", "failed"
+      } else {
+        events "failed"
+      }
       exceptionFormat "full"
     }
+
+    systemProperty 'project.version', project.version
   }
 
   plugins.withType(ScalaPlugin.class) {
     tasks.withType(ScalaCompile.class) {
       scalaCompileOptions.keepAliveMode.set(KeepAliveMode.DAEMON)
       // `options.release` doesn't seem to work for ScalaCompile :(
-      sourceCompatibility = "11"
-      targetCompatibility = "11"
-      scalaCompileOptions.additionalParameters.add("-release:11")
+      sourceCompatibility = "17"
+      targetCompatibility = "17"
+      scalaCompileOptions.additionalParameters.add("-release:17")
     }
   }
 }
@@ -257,6 +282,7 @@ project(':iceberg-bundled-guava') {
       // may be LGPL - use ALv2 findbugs-annotations instead
       exclude group: 'com.google.errorprone'
       exclude group: 'com.google.j2objc'
+      exclude group: 'org.jspecify'
     }
   }
 
@@ -338,6 +364,7 @@ project(':iceberg-core') {
     api project(':iceberg-api')
     implementation project(':iceberg-common')
     implementation project(path: ':iceberg-bundled-guava', configuration: 'shadow')
+    testRuntimeOnly project(':iceberg-parquet')
     annotationProcessor libs.immutables.value
     compileOnly libs.immutables.value
 
@@ -363,9 +390,13 @@ project(':iceberg-core') {
     testImplementation libs.mockserver.netty
     testImplementation libs.mockserver.client.java
     testImplementation libs.sqlite.jdbc
+    testImplementation libs.derby.core
+    testImplementation libs.derby.tools
     testImplementation project(path: ':iceberg-api', configuration: 'testArtifacts')
     testImplementation libs.esotericsoftware.kryo
-    testImplementation libs.guava.testlib
+    testImplementation(libs.guava.testlib) {
+      exclude group: 'junit'
+    }
     testImplementation libs.awaitility
   }
 }
@@ -407,7 +438,6 @@ project(':iceberg-data') {
 
     testImplementation project(path: ':iceberg-api', configuration: 'testArtifacts')
     testImplementation project(path: ':iceberg-core', configuration: 'testArtifacts')
-    testImplementation libs.junit.vintage.engine
   }
 
   test {
@@ -428,6 +458,8 @@ project(':iceberg-aliyun') {
     implementation project(':iceberg-common')
 
     compileOnly libs.aliyun.sdk.oss
+    implementation libs.aliyun.credentials.java
+    implementation libs.aliyun.tea
     compileOnly libs.jaxb.api
     compileOnly libs.activation
     compileOnly libs.jaxb.runtime
@@ -441,6 +473,7 @@ project(':iceberg-aliyun') {
     testImplementation platform(libs.jackson.bom)
     testImplementation "com.fasterxml.jackson.dataformat:jackson-dataformat-xml"
     testImplementation project(path: ':iceberg-api', configuration: 'testArtifacts')
+    testImplementation libs.junit.pioneer
   }
 }
 
@@ -502,6 +535,7 @@ project(':iceberg-aws') {
     testImplementation project(path: ':iceberg-core', configuration: 'testArtifacts')
     testImplementation libs.awaitility
     testImplementation libs.jetty.servlet
+    testImplementation libs.mockito.junit.jupiter
   }
 
   sourceSets {
@@ -547,6 +581,7 @@ project(':iceberg-azure') {
 
     compileOnly platform(libs.azuresdk.bom)
     compileOnly "com.azure:azure-storage-file-datalake"
+    compileOnly "com.azure:azure-security-keyvault-keys"
     compileOnly "com.azure:azure-identity"
 
     testImplementation project(path: ':iceberg-api', configuration: 'testArtifacts')
@@ -554,6 +589,7 @@ project(':iceberg-azure') {
     testImplementation libs.testcontainers
     testImplementation libs.mockserver.netty
     testImplementation libs.mockserver.client.java
+    testImplementation libs.mockito.junit.jupiter
   }
 
   sourceSets {
@@ -657,6 +693,35 @@ project(':iceberg-delta-lake') {
   }
 }
 
+project(':iceberg-bigquery') {
+  test {
+    useJUnitPlatform()
+  }
+
+  dependencies {
+    api project(':iceberg-api')
+    implementation project(':iceberg-common')
+    implementation project(':iceberg-core')
+
+    implementation project(path: ':iceberg-bundled-guava', configuration: 'shadow')
+
+    implementation platform(libs.google.libraries.bom)
+    compileOnly "com.google.cloud:google-cloud-storage"
+    implementation "com.google.cloud:google-cloud-bigquery"
+    implementation "com.google.cloud:google-cloud-core"
+
+    testImplementation project(path: ':iceberg-core', configuration: 'testArtifacts')
+    testImplementation project(path: ':iceberg-api', configuration: 'testArtifacts')
+
+    testImplementation(libs.hadoop3.common) {
+      exclude group: 'org.apache.avro', module: 'avro'
+      exclude group: 'org.slf4j', module: 'slf4j-log4j12'
+      exclude group: 'javax.servlet', module: 'servlet-api'
+      exclude group: 'com.google.code.gson', module: 'gson'
+    }
+  }
+}
+
 project(':iceberg-gcp') {
   test {
     useJUnitPlatform()
@@ -670,6 +735,8 @@ project(':iceberg-gcp') {
 
     compileOnly platform(libs.google.libraries.bom)
     compileOnly "com.google.cloud:google-cloud-storage"
+    compileOnly "com.google.cloud:google-cloud-kms"
+    compileOnly(libs.gcs.analytics.core)
 
     testImplementation "com.google.cloud:google-cloud-nio"
 
@@ -685,6 +752,30 @@ project(':iceberg-gcp') {
     testImplementation libs.esotericsoftware.kryo
     testImplementation libs.mockserver.netty
     testImplementation libs.mockserver.client.java
+    testImplementation libs.mockito.junit.jupiter
+    testImplementation libs.testcontainers
+    testImplementation libs.testcontainers.junit.jupiter
+  }
+
+  sourceSets {
+    integration {
+      java.srcDir "$projectDir/src/integration/java"
+      resources.srcDir "$projectDir/src/integration/resources"
+      compileClasspath += main.output + test.output
+      runtimeClasspath += main.output + test.output
+    }
+  }
+
+  configurations {
+    integrationImplementation.extendsFrom testImplementation
+    integrationRuntime.extendsFrom testRuntimeOnly
+  }
+
+  task integrationTest(type: Test) {
+    useJUnitPlatform()
+    testClassesDirs = sourceSets.integration.output.classesDirs
+    classpath = sourceSets.integration.runtimeClasspath
+    jvmArgs += project.property('extraJvmArgs')
   }
 }
 
@@ -802,6 +893,8 @@ project(':iceberg-orc') {
 }
 
 project(':iceberg-parquet') {
+  apply plugin: 'java-test-fixtures'
+
   test {
     useJUnitPlatform()
   }
@@ -968,6 +1061,7 @@ project(':iceberg-open-api') {
     testFixturesImplementation project(path: ':iceberg-core', configuration: 'testArtifacts')
     testFixturesImplementation project(':iceberg-aws')
     testFixturesImplementation project(':iceberg-gcp')
+    testFixturesImplementation project(':iceberg-bigquery')
     testFixturesImplementation project(':iceberg-azure')
     testFixturesImplementation(libs.hadoop3.common) {
       exclude group: 'org.slf4j'

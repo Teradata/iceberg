@@ -45,6 +45,8 @@ import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.PartitionSet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Base reader for data and delete manifest files.
@@ -53,6 +55,8 @@ import org.apache.iceberg.util.PartitionSet;
  */
 public class ManifestReader<F extends ContentFile<F>> extends CloseableGroup
     implements CloseableIterable<F> {
+  private static final Logger LOG = LoggerFactory.getLogger(ManifestReader.class);
+
   static final ImmutableList<String> ALL_COLUMNS = ImmutableList.of("*");
 
   private static final Set<String> STATS_COLUMNS =
@@ -126,6 +130,10 @@ public class ManifestReader<F extends ContentFile<F>> extends CloseableGroup
     if (specsById != null) {
       this.spec = specsById.get(specId);
     } else {
+      LOG.warn(
+          "Reading partition spec from manifest file metadata is deprecated and will be "
+              + "removed in the 1.12.0 release. Pass specsById to avoid reading from file metadata: {}",
+          file.location());
       this.spec = readPartitionSpec(file);
     }
 
@@ -256,11 +264,11 @@ public class ManifestReader<F extends ContentFile<F>> extends CloseableGroup
   }
 
   private boolean hasRowFilter() {
-    return rowFilter != null && rowFilter != Expressions.alwaysTrue();
+    return rowFilter != alwaysTrue();
   }
 
   private boolean hasPartitionFilter() {
-    return partFilter != null && partFilter != Expressions.alwaysTrue();
+    return partFilter != alwaysTrue();
   }
 
   private boolean inPartitionSet(F fileToCheck) {
@@ -340,32 +348,22 @@ public class ManifestReader<F extends ContentFile<F>> extends CloseableGroup
     if (lazyEvaluator == null) {
       Expression projected = Projections.inclusive(spec, caseSensitive).project(rowFilter);
       Expression finalPartFilter = Expressions.and(projected, partFilter);
-      if (finalPartFilter != null) {
-        this.lazyEvaluator = new Evaluator(spec.partitionType(), finalPartFilter, caseSensitive);
-      } else {
-        this.lazyEvaluator =
-            new Evaluator(spec.partitionType(), Expressions.alwaysTrue(), caseSensitive);
-      }
+      this.lazyEvaluator = new Evaluator(spec.partitionType(), finalPartFilter, caseSensitive);
     }
     return lazyEvaluator;
   }
 
   private InclusiveMetricsEvaluator metricsEvaluator() {
     if (lazyMetricsEvaluator == null) {
-      if (rowFilter != null) {
-        this.lazyMetricsEvaluator =
-            new InclusiveMetricsEvaluator(spec.schema(), rowFilter, caseSensitive);
-      } else {
-        this.lazyMetricsEvaluator =
-            new InclusiveMetricsEvaluator(spec.schema(), Expressions.alwaysTrue(), caseSensitive);
-      }
+      this.lazyMetricsEvaluator =
+          new InclusiveMetricsEvaluator(spec.schema(), rowFilter, caseSensitive);
     }
     return lazyMetricsEvaluator;
   }
 
   private static boolean requireStatsProjection(Expression rowFilter, Collection<String> columns) {
     // Make sure we have all stats columns for metrics evaluator
-    return rowFilter != Expressions.alwaysTrue()
+    return rowFilter != alwaysTrue()
         && columns != null
         && !columns.containsAll(ManifestReader.ALL_COLUMNS)
         && !columns.containsAll(STATS_COLUMNS);

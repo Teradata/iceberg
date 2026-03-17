@@ -23,7 +23,6 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
-import java.util.UUID;
 import java.util.function.Function;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.util.UUIDUtil;
@@ -83,6 +82,8 @@ class ParquetConversions {
       } else if (icebergType.typeId() == Type.TypeID.DOUBLE
           && parquetType.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.FLOAT) {
         return value -> ((Float) fromParquet.apply(value)).doubleValue();
+      } else if (icebergType.typeId() == Type.TypeID.UUID) {
+        return binary -> UUIDUtil.convert(((Binary) binary).toByteBuffer());
       }
     }
 

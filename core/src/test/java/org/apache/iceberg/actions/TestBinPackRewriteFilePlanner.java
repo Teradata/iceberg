@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.File;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -290,7 +291,8 @@ class TestBinPackRewriteFilePlanner {
                 BinPackRewriteFilePlanner.MAX_FILE_GROUP_SIZE_BYTES,
                 BinPackRewriteFilePlanner.DELETE_FILE_THRESHOLD,
                 BinPackRewriteFilePlanner.DELETE_RATIO_THRESHOLD,
-                RewriteDataFiles.REWRITE_JOB_ORDER));
+                RewriteDataFiles.REWRITE_JOB_ORDER,
+                BinPackRewriteFilePlanner.MAX_FILES_TO_REWRITE));
   }
 
   @Test
@@ -453,6 +455,130 @@ class TestBinPackRewriteFilePlanner {
     List<FileScanTask> group = Iterables.getOnlyElement(groups);
     assertThat(group).as("Must rewrite 1 file").hasSize(1);
     assertThat(group).containsExactly(tooManyDeletesTask);
+  }
+
+  @Test
+  public void testInvalidMaxFilesRewriteParam() {
+    BinPackRewriteFilePlanner planner = new BinPackRewriteFilePlanner(table);
+    Map<String, String> invalidMaxFilesToDeleteOption =
+        ImmutableMap.of(BinPackRewriteFilePlanner.MAX_FILES_TO_REWRITE, "0");
+    assertThatThrownBy(() -> planner.init(invalidMaxFilesToDeleteOption))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Cannot set max-files-to-rewrite to 0, the value must be positive integer.");
+
+    Map<String, String> negativeMaxFilesToDeleteOption =
+        ImmutableMap.of(BinPackRewriteFilePlanner.MAX_FILES_TO_REWRITE, "-2");
+    assertThatThrownBy(() -> planner.init(negativeMaxFilesToDeleteOption))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Cannot set max-files-to-rewrite to -2, the value must be positive integer.");
+  }
+
+  @Test
+  public void textMaxFilesRewriteToOnlyTruncateNeededPartitions() {
+    addFiles();
+    BinPackRewriteFilePlanner planner = new BinPackRewriteFilePlanner(table);
+    Map<String, String> options =
+        ImmutableMap.of(
+            BinPackRewriteFilePlanner.MAX_FILES_TO_REWRITE,
+            "4",
+            BinPackRewriteFilePlanner.REWRITE_ALL,
+            "true");
+    planner.init(options);
+
+    FileRewritePlan<FileGroupInfo, FileScanTask, DataFile, RewriteFileGroup> plan = planner.plan();
+    List<RewriteFileGroup> groups = Lists.newArrayList(plan.groups().iterator());
+
+    List<Integer> fileScanTasksListSize =
+        groups.stream()
+            .map(RewriteGroupBase::fileScanTasks)
+            .map(List::size)
+            .sorted()
+            .collect(Collectors.toList());
+    assertThat(fileScanTasksListSize)
+        .isIn(Arrays.asList(Arrays.asList(1, 3), Arrays.asList(1, 1, 2), Arrays.asList(2, 2)));
+    assertThat(fileScanTasksListSize.stream().reduce(0, Integer::sum)).isEqualTo(4);
+  }
+
+  @Test
+  public void testRewriteMaxFilesOption() {
+    addFiles();
+    BinPackRewriteFilePlanner planner = new BinPackRewriteFilePlanner(table);
+    Map<String, String> options =
+        ImmutableMap.of(
+            BinPackRewriteFilePlanner.MAX_FILES_TO_REWRITE,
+            "5",
+            BinPackRewriteFilePlanner.REWRITE_ALL,
+            "true");
+    planner.init(options);
+
+    FileRewritePlan<FileGroupInfo, FileScanTask, DataFile, RewriteFileGroup> plan = planner.plan();
+    List<RewriteFileGroup> groups = Lists.newArrayList(plan.groups().iterator());
+
+    Integer fileScanTasks =
+        groups.stream()
+            .map(RewriteGroupBase::fileScanTasks)
+            .map(List::size)
+            .reduce(0, Integer::sum);
+    assertThat(fileScanTasks).isEqualTo(5);
+  }
+
+  @Test
+  public void testMaxFilesToRewriteUsesCorrectInputSizeForExpectedOutputFiles() {
+    // Create files with known sizes where truncation matters for expectedOutputFiles
+    DataFile largeFile1 = newDataFile("data_bucket=0", 200);
+    DataFile largeFile2 = newDataFile("data_bucket=0", 200);
+    DataFile largeFile3 = newDataFile("data_bucket=0", 200);
+    table.newAppend().appendFile(largeFile1).appendFile(largeFile2).appendFile(largeFile3).commit();
+
+    BinPackRewriteFilePlanner planner = new BinPackRewriteFilePlanner(table);
+    // target=250 means:
+    //   Full group (600 bytes): expectedOutputFiles = ceil(600/250) = 3
+    //   Truncated to 1 file (200 bytes): expectedOutputFiles = ceil(200/250) = 1
+    Map<String, String> options =
+        ImmutableMap.of(
+            BinPackRewriteFilePlanner.MAX_FILES_TO_REWRITE, "1",
+            BinPackRewriteFilePlanner.REWRITE_ALL, "true",
+            BinPackRewriteFilePlanner.TARGET_FILE_SIZE_BYTES, "250");
+    planner.init(options);
+
+    FileRewritePlan<FileGroupInfo, FileScanTask, DataFile, RewriteFileGroup> plan = planner.plan();
+    List<RewriteFileGroup> groups = Lists.newArrayList(plan.groups().iterator());
+
+    assertThat(groups).hasSize(1);
+    RewriteFileGroup group = groups.get(0);
+    // Only 1 file should be in the group due to max-files-to-rewrite=1
+    assertThat(group.inputFileNum()).isEqualTo(1);
+    // expectedOutputFiles should be based on the truncated input (200 bytes), not full group (600)
+    // ceil(200/250) = 1, NOT ceil(600/250) = 3
+    assertThat(group.expectedOutputFiles())
+        .as(
+            "expectedOutputFiles should be computed from actual files being rewritten (200 bytes),"
+                + " not the full group (600 bytes)")
+        .isEqualTo(1);
+  }
+
+  @Test
+  public void testRewriteMaxFilesRewriteGreaterThanTotalFiles() {
+    addFiles();
+    BinPackRewriteFilePlanner planner = new BinPackRewriteFilePlanner(table);
+    Map<String, String> options =
+        ImmutableMap.of(
+            BinPackRewriteFilePlanner.MAX_FILES_TO_REWRITE,
+            "500",
+            BinPackRewriteFilePlanner.REWRITE_ALL,
+            "true");
+    planner.init(options);
+    int numFiles = Iterables.size(table.newScan().planFiles());
+
+    FileRewritePlan<FileGroupInfo, FileScanTask, DataFile, RewriteFileGroup> plan = planner.plan();
+    List<RewriteFileGroup> groups = Lists.newArrayList(plan.groups().iterator());
+
+    Integer fileScanTasks =
+        groups.stream()
+            .map(RewriteGroupBase::fileScanTasks)
+            .map(List::size)
+            .reduce(0, Integer::sum);
+    assertThat(fileScanTasks).isLessThanOrEqualTo(numFiles).isLessThanOrEqualTo(500);
   }
 
   private void addFiles() {

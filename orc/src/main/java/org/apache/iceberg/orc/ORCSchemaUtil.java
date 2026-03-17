@@ -220,22 +220,38 @@ public final class ORCSchemaUtil {
           orcType = TypeDescription.createStruct();
           for (Types.NestedField field : type.asStructType().fields()) {
             TypeDescription childType = convert(field.fieldId(), field.type(), field.isRequired());
-            orcType.addField(field.name(), childType);
+            if (childType != null) {
+              orcType.addField(field.name(), childType);
+            }
           }
           break;
         }
       case LIST:
         {
           Types.ListType list = (Types.ListType) type;
+
+          Preconditions.checkArgument(
+              list.elementType().typeId() != Type.TypeID.UNKNOWN,
+              "Cannot create ListType with unknown element type");
+
           TypeDescription elementType =
               convert(list.elementId(), list.elementType(), list.isElementRequired());
+
           orcType = TypeDescription.createList(elementType);
           break;
         }
       case MAP:
         {
           Types.MapType map = (Types.MapType) type;
+
+          // Only the value can be set as an unknown by definition:
+          // UnknownType requires to be optional, and the key has to be required.
+          Preconditions.checkArgument(
+              map.valueType().typeId() != Type.TypeID.UNKNOWN,
+              "Cannot create MapType with unknown value type");
+
           TypeDescription keyType = convert(map.keyId(), map.keyType(), true);
+
           TypeDescription valueType =
               convert(map.valueId(), map.valueType(), map.isValueRequired());
           orcType = TypeDescription.createMap(keyType, valueType);
@@ -252,7 +268,7 @@ public final class ORCSchemaUtil {
   }
 
   /**
-   * Convert an ORC schema to an Iceberg schema. This method handles the convertion from the
+   * Convert an ORC schema to an Iceberg schema. This method handles the conversion from the
    * original Iceberg column mapping IDs if present in the ORC column attributes, otherwise, ORC
    * columns with no Iceberg IDs will be ignored and skipped in the conversion.
    *

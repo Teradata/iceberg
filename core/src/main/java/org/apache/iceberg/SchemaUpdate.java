@@ -21,6 +21,7 @@ package org.apache.iceberg;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -164,7 +165,7 @@ class SchemaUpdate implements UpdateSchema {
     int newId = assignNewColumnId();
 
     // update tracking for moves
-    addedNameToId.put(fullName, newId);
+    addedNameToId.put(caseSensitivityAwareName(fullName), newId);
     if (parentId != TABLE_ROOT_ID) {
       idToParent.put(newId, parentId);
     }
@@ -391,7 +392,7 @@ class SchemaUpdate implements UpdateSchema {
   }
 
   private boolean isAdded(String name) {
-    return addedNameToId.containsKey(name);
+    return addedNameToId.containsKey(caseSensitivityAwareName(name));
   }
 
   private Types.NestedField findForUpdate(String name) {
@@ -405,7 +406,7 @@ class SchemaUpdate implements UpdateSchema {
       return existing;
     }
 
-    Integer addedId = addedNameToId.get(name);
+    Integer addedId = addedNameToId.get(caseSensitivityAwareName(name));
     if (addedId != null) {
       return updates.get(addedId);
     }
@@ -414,7 +415,7 @@ class SchemaUpdate implements UpdateSchema {
   }
 
   private Integer findForMove(String name) {
-    Integer addedId = addedNameToId.get(name);
+    Integer addedId = addedNameToId.get(caseSensitivityAwareName(name));
     if (addedId != null) {
       return addedId;
     }
@@ -516,7 +517,8 @@ class SchemaUpdate implements UpdateSchema {
         Set<String> columnProperties =
             ImmutableSet.of(
                 TableProperties.METRICS_MODE_COLUMN_CONF_PREFIX,
-                TableProperties.PARQUET_BLOOM_FILTER_COLUMN_ENABLED_PREFIX);
+                TableProperties.PARQUET_BLOOM_FILTER_COLUMN_ENABLED_PREFIX,
+                TableProperties.PARQUET_COLUMN_STATS_ENABLED_PREFIX);
         Map<String, String> updatedProperties =
             PropertyUtil.applySchemaChanges(
                 newMetadata.properties(), deletedColumns, renamedColumns, columnProperties);
@@ -566,7 +568,8 @@ class SchemaUpdate implements UpdateSchema {
             .asStructType();
 
     // validate identifier requirements based on the latest schema
-    Map<String, Integer> nameToId = TypeUtil.indexByName(struct);
+    Map<String, Integer> nameToId =
+        caseSensitive ? TypeUtil.indexByName(struct) : TypeUtil.indexByLowerCaseName(struct);
     Set<Integer> freshIdentifierFieldIds = Sets.newHashSet();
     for (String name : identifierFieldNames) {
       Preconditions.checkArgument(
@@ -867,5 +870,9 @@ class SchemaUpdate implements UpdateSchema {
 
   private Types.NestedField findField(String fieldName) {
     return caseSensitive ? schema.findField(fieldName) : schema.caseInsensitiveFindField(fieldName);
+  }
+
+  private String caseSensitivityAwareName(String name) {
+    return caseSensitive ? name : name.toLowerCase(Locale.ROOT);
   }
 }

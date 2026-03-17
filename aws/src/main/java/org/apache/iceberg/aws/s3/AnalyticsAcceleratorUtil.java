@@ -20,12 +20,14 @@ package org.apache.iceberg.aws.s3;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.RemovalListener;
 import java.io.IOException;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.io.SeekableInputStream;
 import org.apache.iceberg.util.Pair;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
-import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.s3.analyticsaccelerator.ObjectClientConfiguration;
 import software.amazon.s3.analyticsaccelerator.S3SdkObjectClient;
 import software.amazon.s3.analyticsaccelerator.S3SeekableInputStream;
@@ -33,28 +35,26 @@ import software.amazon.s3.analyticsaccelerator.S3SeekableInputStreamConfiguratio
 import software.amazon.s3.analyticsaccelerator.S3SeekableInputStreamFactory;
 import software.amazon.s3.analyticsaccelerator.common.ConnectorConfiguration;
 import software.amazon.s3.analyticsaccelerator.request.ObjectClient;
-import software.amazon.s3.analyticsaccelerator.request.ObjectMetadata;
-import software.amazon.s3.analyticsaccelerator.util.OpenStreamInformation;
 import software.amazon.s3.analyticsaccelerator.util.S3URI;
 
 class AnalyticsAcceleratorUtil {
 
+  private static final Logger LOG = LoggerFactory.getLogger(AnalyticsAcceleratorUtil.class);
+
   private static final Cache<Pair<S3AsyncClient, S3FileIOProperties>, S3SeekableInputStreamFactory>
-      STREAM_FACTORY_CACHE = Caffeine.newBuilder().maximumSize(100).build();
+      STREAM_FACTORY_CACHE =
+          Caffeine.newBuilder()
+              .maximumSize(100)
+              .removalListener(
+                  (RemovalListener<
+                          Pair<S3AsyncClient, S3FileIOProperties>, S3SeekableInputStreamFactory>)
+                      (key, factory, cause) -> close(factory))
+              .build();
 
   private AnalyticsAcceleratorUtil() {}
 
   public static SeekableInputStream newStream(S3InputFile inputFile) {
     S3URI uri = S3URI.of(inputFile.uri().bucket(), inputFile.uri().key());
-    HeadObjectResponse metadata = inputFile.getObjectMetadata();
-    OpenStreamInformation openStreamInfo =
-        OpenStreamInformation.builder()
-            .objectMetadata(
-                ObjectMetadata.builder()
-                    .contentLength(metadata.contentLength())
-                    .etag(metadata.eTag())
-                    .build())
-            .build();
 
     S3SeekableInputStreamFactory factory =
         STREAM_FACTORY_CACHE.get(
@@ -62,7 +62,7 @@ class AnalyticsAcceleratorUtil {
             AnalyticsAcceleratorUtil::createNewFactory);
 
     try {
-      S3SeekableInputStream seekableInputStream = factory.createStream(uri, openStreamInfo);
+      S3SeekableInputStream seekableInputStream = factory.createStream(uri);
       return new AnalyticsAcceleratorInputStreamWrapper(seekableInputStream);
     } catch (IOException e) {
       throw new RuntimeIOException(
@@ -81,6 +81,16 @@ class AnalyticsAcceleratorUtil {
 
     ObjectClient objectClient = new S3SdkObjectClient(cacheKey.first(), objectClientConfiguration);
     return new S3SeekableInputStreamFactory(objectClient, streamConfiguration);
+  }
+
+  private static void close(S3SeekableInputStreamFactory factory) {
+    if (factory != null) {
+      try {
+        factory.close();
+      } catch (IOException e) {
+        LOG.warn("Failed to close S3SeekableInputStreamFactory", e);
+      }
+    }
   }
 
   public static void cleanupCache(

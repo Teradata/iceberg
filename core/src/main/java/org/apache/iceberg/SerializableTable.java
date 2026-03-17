@@ -22,14 +22,11 @@ import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.encryption.EncryptionManager;
-import org.apache.iceberg.hadoop.HadoopConfigurable;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.LocationProvider;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.util.SerializableMap;
-import org.apache.iceberg.util.SerializableSupplier;
 
 /**
  * A read-only serializable table that can be sent to other nodes in a cluster.
@@ -41,10 +38,10 @@ import org.apache.iceberg.util.SerializableSupplier;
  * table metadata, it directly persists the current schema, spec, sort order, table properties to
  * avoid reading the metadata file from other nodes for frequently needed metadata.
  *
- * <p>The implementation assumes the passed instances of {@link FileIO}, {@link EncryptionManager}
- * are serializable. If you are serializing the table using a custom serialization framework like
- * Kryo, those instances of {@link FileIO}, {@link EncryptionManager} must be supported by that
- * particular serialization framework.
+ * <p>The implementation assumes the passed instances of {@link FileIO}, {@link EncryptionManager},
+ * {@link LocationProvider} are serializable. If you are serializing the table using a custom
+ * serialization framework like Kryo, those instances of {@link FileIO}, {@link EncryptionManager},
+ * {@link LocationProvider} must be supported by that particular serialization framework.
  *
  * <p><em>Note:</em> loading the complete metadata from a large number of nodes can overwhelm the
  * storage.
@@ -65,8 +62,8 @@ public class SerializableTable implements Table, HasTableOperations, Serializabl
   private final Map<String, SnapshotRef> refs;
   private final UUID uuid;
   private final int formatVersion;
+  private final Try<LocationProvider> locationProviderTry;
 
-  private transient volatile LocationProvider lazyLocationProvider = null;
   private transient volatile Table lazyTable = null;
   private transient volatile Schema lazySchema = null;
   private transient volatile Map<Integer, PartitionSpec> lazySpecs = null;
@@ -83,8 +80,9 @@ public class SerializableTable implements Table, HasTableOperations, Serializabl
     Map<Integer, PartitionSpec> specs = table.specs();
     specs.forEach((specId, spec) -> specAsJsonMap.put(specId, PartitionSpecParser.toJson(spec)));
     this.sortOrderAsJson = SortOrderParser.toJson(table.sortOrder());
-    this.io = fileIO(table);
+    this.io = table.io();
     this.encryption = table.encryption();
+    this.locationProviderTry = Try.of(table::locationProvider);
     this.refs = SerializableMap.copyOf(table.refs());
     this.uuid = table.uuid();
     this.formatVersion = formatVersion(table);
@@ -121,14 +119,6 @@ public class SerializableTable implements Table, HasTableOperations, Serializabl
     } else {
       return null;
     }
-  }
-
-  private FileIO fileIO(Table table) {
-    if (table.io() instanceof HadoopConfigurable) {
-      ((HadoopConfigurable) table.io()).serializeConfWith(SerializableConfSupplier::new);
-    }
-
-    return table.io();
   }
 
   private Table lazyTable() {
@@ -265,14 +255,7 @@ public class SerializableTable implements Table, HasTableOperations, Serializabl
 
   @Override
   public LocationProvider locationProvider() {
-    if (lazyLocationProvider == null) {
-      synchronized (this) {
-        if (lazyLocationProvider == null) {
-          this.lazyLocationProvider = LocationProviders.locationsFor(location, properties);
-        }
-      }
-    }
-    return lazyLocationProvider;
+    return this.locationProviderTry.getOrThrow();
   }
 
   @Override
@@ -457,33 +440,6 @@ public class SerializableTable implements Table, HasTableOperations, Serializabl
 
     public MetadataTableType type() {
       return type;
-    }
-  }
-
-  // captures the current state of a Hadoop configuration in a serializable manner
-  private static class SerializableConfSupplier implements SerializableSupplier<Configuration> {
-
-    private final Map<String, String> confAsMap;
-    private transient volatile Configuration conf = null;
-
-    SerializableConfSupplier(Configuration conf) {
-      this.confAsMap = Maps.newHashMapWithExpectedSize(conf.size());
-      conf.forEach(entry -> confAsMap.put(entry.getKey(), entry.getValue()));
-    }
-
-    @Override
-    public Configuration get() {
-      if (conf == null) {
-        synchronized (this) {
-          if (conf == null) {
-            Configuration newConf = new Configuration(false);
-            confAsMap.forEach(newConf::set);
-            this.conf = newConf;
-          }
-        }
-      }
-
-      return conf;
     }
   }
 }

@@ -139,7 +139,7 @@ public class InclusiveMetricsEvaluator {
       // if the column has no null values, the expression cannot match
       if (isNonNullPreserving(term)) {
         // number of non-nulls is the same as for the ref
-        Integer id = term.ref().fieldId();
+        int id = term.ref().fieldId();
         if (!mayContainNull(id)) {
           return ROWS_CANNOT_MATCH;
         }
@@ -154,7 +154,7 @@ public class InclusiveMetricsEvaluator {
       // if the column has no non-null values, the expression cannot match
 
       // all terms are null preserving. see #isNullPreserving(Bound)
-      Integer id = term.ref().fieldId();
+      int id = term.ref().fieldId();
       if (containsNullsOnly(id)) {
         return ROWS_CANNOT_MATCH;
       }
@@ -166,7 +166,7 @@ public class InclusiveMetricsEvaluator {
     public <T> Boolean isNaN(Bound<T> term) {
       // when there's no nanCounts information, but we already know the column only contains null,
       // it's guaranteed that there's no NaN value
-      Integer id = term.ref().fieldId();
+      int id = term.ref().fieldId();
       if (containsNullsOnly(id)) {
         return ROWS_CANNOT_MATCH;
       }
@@ -189,7 +189,7 @@ public class InclusiveMetricsEvaluator {
         return ROWS_MIGHT_MATCH;
       }
 
-      Integer id = term.ref().fieldId();
+      int id = term.ref().fieldId();
 
       if (containsNaNsOnly(id)) {
         return ROWS_CANNOT_MATCH;
@@ -201,7 +201,7 @@ public class InclusiveMetricsEvaluator {
     @Override
     public <T> Boolean lt(Bound<T> term, Literal<T> lit) {
       // all terms are null preserving. see #isNullPreserving(Bound)
-      Integer id = term.ref().fieldId();
+      int id = term.ref().fieldId();
       if (containsNullsOnly(id) || containsNaNsOnly(id)) {
         return ROWS_CANNOT_MATCH;
       }
@@ -228,7 +228,7 @@ public class InclusiveMetricsEvaluator {
     @Override
     public <T> Boolean ltEq(Bound<T> term, Literal<T> lit) {
       // all terms are null preserving. see #isNullPreserving(Bound)
-      Integer id = term.ref().fieldId();
+      int id = term.ref().fieldId();
       if (containsNullsOnly(id) || containsNaNsOnly(id)) {
         return ROWS_CANNOT_MATCH;
       }
@@ -255,7 +255,7 @@ public class InclusiveMetricsEvaluator {
     @Override
     public <T> Boolean gt(Bound<T> term, Literal<T> lit) {
       // all terms are null preserving. see #isNullPreserving(Bound)
-      Integer id = term.ref().fieldId();
+      int id = term.ref().fieldId();
       if (containsNullsOnly(id) || containsNaNsOnly(id)) {
         return ROWS_CANNOT_MATCH;
       }
@@ -276,7 +276,7 @@ public class InclusiveMetricsEvaluator {
     @Override
     public <T> Boolean gtEq(Bound<T> term, Literal<T> lit) {
       // all terms are null preserving. see #isNullPreserving(Bound)
-      Integer id = term.ref().fieldId();
+      int id = term.ref().fieldId();
       if (containsNullsOnly(id) || containsNaNsOnly(id)) {
         return ROWS_CANNOT_MATCH;
       }
@@ -297,7 +297,7 @@ public class InclusiveMetricsEvaluator {
     @Override
     public <T> Boolean eq(Bound<T> term, Literal<T> lit) {
       // all terms are null preserving. see #isNullPreserving(Bound)
-      Integer id = term.ref().fieldId();
+      int id = term.ref().fieldId();
       if (containsNullsOnly(id) || containsNaNsOnly(id)) {
         return ROWS_CANNOT_MATCH;
       }
@@ -327,13 +327,21 @@ public class InclusiveMetricsEvaluator {
     public <T> Boolean notEq(Bound<T> term, Literal<T> lit) {
       // because the bounds are not necessarily a min or max value, this cannot be answered using
       // them. notEq(col, X) with (X, Y) doesn't guarantee that X is a value in col.
+      // However, when min == max and the file has no nulls or NaN values, we can safely prune
+      // if that value equals the literal.
+      T value = uniqueValue(term);
+
+      if (value != null && lit.comparator().compare(value, lit.value()) == 0) {
+        return ROWS_CANNOT_MATCH;
+      }
+
       return ROWS_MIGHT_MATCH;
     }
 
     @Override
     public <T> Boolean in(Bound<T> term, Set<T> literalSet) {
       // all terms are null preserving. see #isNullPreserving(Bound)
-      Integer id = term.ref().fieldId();
+      int id = term.ref().fieldId();
       if (containsNullsOnly(id) || containsNaNsOnly(id)) {
         return ROWS_CANNOT_MATCH;
       }
@@ -381,6 +389,14 @@ public class InclusiveMetricsEvaluator {
     public <T> Boolean notIn(Bound<T> term, Set<T> literalSet) {
       // because the bounds are not necessarily a min or max value, this cannot be answered using
       // them. notIn(col, {X, ...}) with (X, Y) doesn't guarantee that X is a value in col.
+      // However, when min == max and the file has no nulls or NaN values, we can safely prune
+      // if that value is in the exclusion set.
+      T value = uniqueValue(term);
+
+      if (value != null && literalSet.contains(value)) {
+        return ROWS_CANNOT_MATCH;
+      }
+
       return ROWS_MIGHT_MATCH;
     }
 
@@ -392,7 +408,7 @@ public class InclusiveMetricsEvaluator {
         return ROWS_MIGHT_MATCH;
       }
 
-      Integer id = term.ref().fieldId();
+      int id = term.ref().fieldId();
       if (containsNullsOnly(id)) {
         return ROWS_CANNOT_MATCH;
       }
@@ -431,7 +447,7 @@ public class InclusiveMetricsEvaluator {
     @Override
     public <T> Boolean notStartsWith(Bound<T> term, Literal<T> lit) {
       // the only transforms that produce strings are truncate and identity, which work with this
-      Integer id = term.ref().fieldId();
+      int id = term.ref().fieldId();
       if (mayContainNull(id)) {
         return ROWS_MIGHT_MATCH;
       }
@@ -490,6 +506,34 @@ public class InclusiveMetricsEvaluator {
           && nanCounts.get(id).equals(valueCounts.get(id));
     }
 
+    /**
+     * Returns the column's single value if all rows contain the same value. Defined as a column
+     * with no nulls, no NaNs, and lower bound equals upper bound. Returns null otherwise.
+     */
+    private <T> T uniqueValue(Bound<T> term) {
+      int id = term.ref().fieldId();
+      if (mayContainNull(id)) {
+        return null;
+      }
+
+      T lower = lowerBound(term);
+      T upper = upperBound(term);
+
+      if (lower == null || upper == null || NaNUtil.isNaN(lower) || NaNUtil.isNaN(upper)) {
+        return null;
+      }
+
+      if (nanCounts != null && nanCounts.containsKey(id) && nanCounts.get(id) != 0) {
+        return null;
+      }
+
+      if (!lower.equals(upper)) {
+        return null;
+      }
+
+      return lower;
+    }
+
     private <T> T lowerBound(Bound<T> term) {
       if (term instanceof BoundReference) {
         return parseLowerBound((BoundReference<T>) term);
@@ -515,7 +559,7 @@ public class InclusiveMetricsEvaluator {
     }
 
     private <T> T parseLowerBound(BoundReference<T> ref) {
-      Integer id = ref.fieldId();
+      int id = ref.fieldId();
       if (lowerBounds != null && lowerBounds.containsKey(id)) {
         return Conversions.fromByteBuffer(ref.ref().type(), lowerBounds.get(id));
       }
@@ -524,7 +568,7 @@ public class InclusiveMetricsEvaluator {
     }
 
     private <T> T parseUpperBound(BoundReference<T> ref) {
-      Integer id = ref.fieldId();
+      int id = ref.fieldId();
       if (upperBounds != null && upperBounds.containsKey(id)) {
         return Conversions.fromByteBuffer(ref.ref().type(), upperBounds.get(id));
       }
@@ -553,7 +597,7 @@ public class InclusiveMetricsEvaluator {
     }
 
     private <T> T extractLowerBound(BoundExtract<T> bound) {
-      Integer id = bound.ref().fieldId();
+      int id = bound.ref().fieldId();
       if (lowerBounds != null && lowerBounds.containsKey(id)) {
         VariantObject fieldLowerBounds = parseBounds(lowerBounds.get(id));
         return VariantExpressionUtil.castTo(fieldLowerBounds.get(bound.path()), bound.type());
@@ -563,7 +607,7 @@ public class InclusiveMetricsEvaluator {
     }
 
     private <T> T extractUpperBound(BoundExtract<T> bound) {
-      Integer id = bound.ref().fieldId();
+      int id = bound.ref().fieldId();
       if (upperBounds != null && upperBounds.containsKey(id)) {
         VariantObject fieldUpperBounds = parseBounds(upperBounds.get(id));
         return VariantExpressionUtil.castTo(fieldUpperBounds.get(bound.path()), bound.type());
@@ -571,22 +615,6 @@ public class InclusiveMetricsEvaluator {
 
       return null;
     }
-
-    /** Returns true if the expression term produces a null value for a null input. */
-    //    private boolean isNullPreserving(Bound<?> term) {
-    //      if (term instanceof BoundReference) {
-    //        return true;
-    //      } else if (term instanceof BoundTransform<?, ?>) {
-    //        // transforms must map null to null
-    //        return true;
-    //      } else if (term instanceof BoundExtract) {
-    //        // a null variant contains no non-null values
-    //        return true;
-    //      }
-    //
-    //      // unknown cases are not null preserving
-    //      return false;
-    //    }
 
     /** Returns true if the expression term produces a non-null value for non-null input. */
     private boolean isNonNullPreserving(Bound<?> term) {

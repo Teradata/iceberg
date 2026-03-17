@@ -73,7 +73,8 @@ public class ResolvingFileIO
   private final transient StackTraceElement[] createStack;
   private SerializableMap<String, String> properties;
   private SerializableSupplier<Configuration> hadoopConf;
-  private List<StorageCredential> storageCredentials = List.of();
+  // use modifiable collection for Kryo serde
+  private List<StorageCredential> storageCredentials = Lists.newArrayList();
 
   /**
    * No-arg constructor to load the FileIO dynamically.
@@ -153,7 +154,7 @@ public class ResolvingFileIO
 
   @Override
   public void setConf(Configuration conf) {
-    this.hadoopConf = new SerializableConfiguration(conf)::get;
+    this.hadoopConf = new SerializableConfiguration(conf);
   }
 
   @Override
@@ -253,7 +254,7 @@ public class ResolvingFileIO
     return null;
   }
 
-  @SuppressWarnings({"checkstyle:NoFinalizer", "Finalize"})
+  @SuppressWarnings({"checkstyle:NoFinalizer", "Finalize", "deprecation"})
   @Override
   protected void finalize() throws Throwable {
     super.finalize();
