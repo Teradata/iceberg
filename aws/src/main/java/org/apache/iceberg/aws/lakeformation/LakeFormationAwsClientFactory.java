@@ -139,7 +139,7 @@ public class LakeFormationAwsClientFactory extends AssumeRoleAwsClientFactory {
         "arn:%s:glue:%s:%s:table/%s/%s", partitionName, region(), glueAccountId, dbName, tableName);
   }
 
-  private LakeFormationClient lakeFormation() {
+  protected LakeFormationClient lakeFormation() {
     return LakeFormationClient.builder()
         .applyMutation(this::applyAssumeRoleConfigurations)
         .applyMutation(httpClientProperties()::applyHttpClientConfigurations)
