@@ -209,47 +209,6 @@ public class TestLocationProvider extends TestBase {
   }
 
   @TestTemplate
-  public void testObjectStorageLocationProviderThrowOnDeprecatedProperties() {
-    String objectPath = "s3://random/object/location";
-    table
-        .updateProperties()
-        .set(TableProperties.OBJECT_STORE_ENABLED, "true")
-        .set(TableProperties.WRITE_FOLDER_STORAGE_LOCATION, objectPath)
-        .commit();
-
-    assertThatThrownBy(() -> table.locationProvider().newDataLocation("file"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage(
-            "Property 'write.folder-storage.path' has been deprecated and will be removed in 2.0, use 'write.data.path' instead.");
-
-    table
-        .updateProperties()
-        .set(TableProperties.OBJECT_STORE_PATH, objectPath)
-        .remove(TableProperties.WRITE_FOLDER_STORAGE_LOCATION)
-        .commit();
-
-    assertThatThrownBy(() -> table.locationProvider().newDataLocation("file"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage(
-            "Property 'write.object-storage.path' has been deprecated and will be removed in 2.0, use 'write.data.path' instead.");
-  }
-
-  @TestTemplate
-  public void testDefaultStorageLocationProviderThrowOnDeprecatedProperties() {
-    String folderPath = "s3://random/folder/location";
-    table
-        .updateProperties()
-        .set(TableProperties.OBJECT_STORE_ENABLED, "false")
-        .set(TableProperties.WRITE_FOLDER_STORAGE_LOCATION, folderPath)
-        .commit();
-
-    assertThatThrownBy(() -> table.locationProvider().newDataLocation("file"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage(
-            "Property 'write.folder-storage.path' has been deprecated and will be removed in 2.0, use 'write.data.path' instead.");
-  }
-
-  @TestTemplate
   public void testObjectStorageWithinTableLocation() {
     table.updateProperties().set(TableProperties.OBJECT_STORE_ENABLED, "true").commit();
 
