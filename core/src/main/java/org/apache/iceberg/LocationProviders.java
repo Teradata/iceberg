@@ -20,12 +20,10 @@ package org.apache.iceberg;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
-import java.util.Set;
 import org.apache.hadoop.fs.Path;
 import org.apache.iceberg.common.DynConstructors;
 import org.apache.iceberg.io.LocationProvider;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
-import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.relocated.com.google.common.hash.HashCode;
 import org.apache.iceberg.relocated.com.google.common.hash.HashFunction;
 import org.apache.iceberg.relocated.com.google.common.hash.Hashing;
@@ -77,20 +75,10 @@ public class LocationProviders {
     }
   }
 
-  private static final Set<String> DEPRECATED_PROPERTIES =
-      ImmutableSet.of(
-          TableProperties.OBJECT_STORE_PATH, TableProperties.WRITE_FOLDER_STORAGE_LOCATION);
-
   private static String getAndCheckLegacyLocation(Map<String, String> properties, String key) {
+    // bypass the check for write.storage.data.location and write.folder-storage-location to avoid
+    // issues with SerializableTable
     String value = properties.get(key);
-
-    if (value != null && DEPRECATED_PROPERTIES.contains(key)) {
-      throw new IllegalArgumentException(
-          String.format(
-              "Property '%s' has been deprecated and will be removed in 2.0, use '%s' instead.",
-              key, TableProperties.WRITE_DATA_LOCATION));
-    }
-
     return value;
   }
 
